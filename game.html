@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Word Game</title>
+
+<style>
+body{
+    font-family:Segoe UI;
+    background:linear-gradient(135deg,#667eea,#764ba2);
+    margin:0;
+    padding:20px;
+    color:#333;
+}
+
+.container{
+    background:#fff;
+    max-width:900px;
+    margin:auto;
+    padding:20px;
+    border-radius:20px;
+}
+
+.screen{display:none}
+.screen.active{display:block}
+
+.btn{
+    padding:12px;
+    border:none;
+    border-radius:10px;
+    background:#667eea;
+    color:#fff;
+    cursor:pointer;
+    margin:5px;
+}
+
+.players-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
+    gap:10px;
+}
+
+.player{
+    padding:10px;
+    border-radius:10px;
+    background:#eee;
+    text-align:center;
+    cursor:pointer;
+    transition:0.2s;
+}
+
+.player:hover{
+    transform:scale(1.05);
+    background:#ddd;
+}
+
+.player.selected{
+    background:#4caf50;
+    color:#fff;
+}
+
+.timer{
+    font-size:40px;
+    text-align:center;
+    margin:20px;
+}
+
+.phrase{
+    font-size:28px;
+    text-align:center;
+    padding:20px;
+    border:2px dashed #667eea;
+    margin:20px 0;
+}
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>Word Game</h1>
+
+<!-- MENU -->
+<div id="menu" class="screen active">
+    <input id="nickname" placeholder="Nickname">
+    <button class="btn" onclick="createRoom()">Create</button>
+    <input id="roomCode" placeholder="Room code">
+    <button class="btn" onclick="joinRoom()">Join</button>
+</div>
+
+<!-- LOBBY -->
+<div id="lobby" class="screen">
+    <h2>Lobby</h2>
+
+    <div id="playersLobby"></div>
+
+    <button class="btn" id="startBtn" onclick="startGame()">Start Game</button>
+</div>
+
+<!-- GAME -->
+<div id="game" class="screen">
+
+    <div class="timer" id="timer">0</div>
+
+    <div class="phrase" id="phraseBox" style="display:none"></div>
+
+    <h3>Vote who wrote it:</h3>
+    <div class="players-grid" id="playersVote"></div>
+
+    <button class="btn" onclick="sendVote()">Send Vote</button>
+
+    <div id="chat"></div>
+
+</div>
+
+<!-- END -->
+<div id="end" class="screen">
+    <h2>Game Over</h2>
+    <div id="results"></div>
+</div>
+
+</div>
+
+<script>
+
+let ws;
+let roomCode;
+let playerId;
+let selectedVote = null;
+let players = [];
+
+// =========================
+// NAV
+// =========================
+function show(id){
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+}
+
+// =========================
+// CREATE / JOIN
+// =========================
+async function createRoom(){
+    const nick = document.getElementById("nickname").value;
+
+    const res = await fetch("/api/rooms/create", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({host_nickname:nick})
+    });
+
+    const data = await res.json();
+
+    roomCode = data.room_code;
+    playerId = data.player_id;
+
+    connectWS();
+    show("lobby");
+}
+
+async function joinRoom(){
+    const nick = document.getElementById("nickname").value;
+    const code = document.getElementById("roomCode").value;
+
+    const res = await fetch("/api/rooms/join", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({nickname:nick, room_code:code})
+    });
+
+    const data = await res.json();
+
+    roomCode = code;
+    playerId = data.player_id;
+
+    connectWS();
+    show("lobby");
+}
+
+// =========================
+// WS
+// =========================
+function connectWS(){
+    ws = new WebSocket(`ws://${location.host}/ws/${roomCode}/${playerId}`);
+
+    ws.onmessage = (e)=>{
+        const msg = JSON.parse(e.data);
+        handle(msg);
+    };
+}
+
+// =========================
+// HANDLE SERVER MSG
+// =========================
+function handle(msg){
+
+    if(msg.type === "start_voting"){
+        show("game");
+
+        document.getElementById("phraseBox").style.display = "block";
+        document.getElementById("phraseBox").innerText = msg.data.phrase;
+
+        renderPlayersVote();
+    }
+
+    if(msg.type === "timer_update"){
+        document.getElementById("timer").innerText = msg.data.seconds;
+    }
+
+    if(msg.type === "reveal_author"){
+        alert("Author: " + msg.data.author);
+    }
+
+    if(msg.type === "game_end"){
+        show("end");
+        document.getElementById("results").innerText =
+            JSON.stringify(msg.data.final_scores, null, 2);
+    }
+
+    if(msg.type === "chat_message"){
+        console.log(msg);
+    }
+
+    if(msg.type === "player_joined"){
+        console.log("player joined");
+    }
+}
+
+// =========================
+// PLAYERS UI
+// =========================
+function renderPlayersVote(){
+    const container = document.getElementById("playersVote");
+    container.innerHTML = "";
+
+    players.forEach(p=>{
+        const div = document.createElement("div");
+        div.className = "player";
+        div.innerText = p.nickname;
+
+        div.onclick = ()=>{
+            document.querySelectorAll(".player").forEach(el=>el.classList.remove("selected"));
+            div.classList.add("selected");
+            selectedVote = p.id;
+        };
+
+        container.appendChild(div);
+    });
+}
+
+// =========================
+// SEND VOTE
+// =========================
+function sendVote(){
+    if(!selectedVote) return alert("Pick player!");
+
+    ws.send(JSON.stringify({
+        type:"vote",
+        data:{
+            voted_player_id:selectedVote
+        }
+    }));
+}
+
+// =========================
+// START GAME
+// =========================
+function startGame(){
+    ws.send(JSON.stringify({
+        type:"start_game"
+    }));
+}
+
+</script>
+
+</body>
+</html>
