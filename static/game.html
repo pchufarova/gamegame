@@ -187,8 +187,15 @@ function connectWS(){
     };
 
     ws.onmessage = (e) => {
-        handle(JSON.parse(e.data));
-    };
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === "player_joined" || msg.type === "player_left") {
+        updateLobby(); // <- ключевой фикс
+        return;
+    }
+
+    handle(msg);
+};
 }
 
 // LOBBY
