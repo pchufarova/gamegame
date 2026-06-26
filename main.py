@@ -2,19 +2,13 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
-
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-
 import random
 
 from database import SessionLocal, Base, engine, Room, Player
 from game_manager import manager, GameLogic
 
-
-# =========================
-# APP
-# =========================
 app = FastAPI()
 
 app.add_middleware(
@@ -29,10 +23,6 @@ Base.metadata.create_all(bind=engine)
 
 game = GameLogic(SessionLocal)
 
-
-# =========================
-# STATIC (HTML FRONTEND)
-# =========================
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -41,9 +31,6 @@ def root():
     return RedirectResponse("/static/game.html")
 
 
-# =========================
-# DB
-# =========================
 def get_db():
     db = SessionLocal()
     try:
@@ -52,9 +39,6 @@ def get_db():
         db.close()
 
 
-# =========================
-# MODELS (API)
-# =========================
 class CreateRoom(BaseModel):
     host_nickname: str
 
@@ -64,9 +48,6 @@ class JoinRoom(BaseModel):
     nickname: str
 
 
-# =========================
-# CREATE ROOM
-# =========================
 @app.post("/api/rooms/create")
 def create_room(data: CreateRoom, db: Session = Depends(get_db)):
     room = Room(
@@ -74,7 +55,6 @@ def create_room(data: CreateRoom, db: Session = Depends(get_db)):
         host_player_id=None,
         is_active=True
     )
-
     db.add(room)
     db.commit()
     db.refresh(room)
@@ -84,7 +64,6 @@ def create_room(data: CreateRoom, db: Session = Depends(get_db)):
         room_id=room.id,
         avatar_color="#4A90D9"
     )
-
     db.add(player)
     db.commit()
     db.refresh(player)
@@ -98,9 +77,6 @@ def create_room(data: CreateRoom, db: Session = Depends(get_db)):
     }
 
 
-# =========================
-# JOIN ROOM
-# =========================
 @app.post("/api/rooms/join")
 def join_room(data: JoinRoom, db: Session = Depends(get_db)):
     room = db.query(Room).filter(Room.code == data.room_code).first()
@@ -123,9 +99,6 @@ def join_room(data: JoinRoom, db: Session = Depends(get_db)):
     }
 
 
-# =========================
-# ROOM INFO (LOBBY REFRESH)
-# =========================
 @app.get("/api/rooms/{room_code}")
 def get_room(room_code: str, db: Session = Depends(get_db)):
     room = db.query(Room).filter(Room.code == room_code).first()
@@ -150,40 +123,28 @@ def get_room(room_code: str, db: Session = Depends(get_db)):
     }
 
 
-# =========================
-# WEBSOCKET
-# =========================
 @app.websocket("/ws/{room_code}/{player_id}")
 async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: int):
     await manager.connect(room_code, player_id, websocket)
 
-    try:
-        await manager.broadcast_to_room(room_code, {
-            "type": "player_joined",
-            "data": {"player_id": player_id}
-        })
+    await manager.broadcast_to_room(room_code, {
+        "type": "player_joined"
+    })
 
+    try:
         while True:
             data = await websocket.receive_json()
-
             msg_type = data.get("type")
             payload = data.get("data", {})
 
-            # START GAME
             if msg_type == "start_game":
-                await game.start_game(room_code)
+                db = SessionLocal()
+                room = db.query(Room).filter(Room.code == room_code).first()
+                db.close()
 
-            # CHAT
-            elif msg_type == "chat":
-                await manager.broadcast_to_room(room_code, {
-                    "type": "chat_message",
-                    "data": {
-                        "player_id": player_id,
-                        "message": payload.get("message", "")
-                    }
-                })
+                if room and room.host_player_id == player_id:
+                    await game.start_game(room_code)
 
-            # VOTE
             elif msg_type == "vote":
                 await game.handle_vote(
                     room_code,
@@ -195,6 +156,5 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
         manager.disconnect(room_code, player_id)
 
         await manager.broadcast_to_room(room_code, {
-            "type": "player_left",
-            "data": {"player_id": player_id}
+            "type": "player_left"
         })

@@ -2,96 +2,55 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Word Game</title>
 
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-
 body{
-    font-family:'Segoe UI',sans-serif;
+    font-family:Segoe UI;
     background:linear-gradient(135deg,#667eea,#764ba2);
-    min-height:100vh;
-    display:flex;
-    justify-content:center;
-    align-items:center;
+    margin:0;
     padding:20px;
+    color:#333;
 }
 
 .container{
     background:#fff;
+    max-width:900px;
+    margin:auto;
+    padding:20px;
     border-radius:20px;
-    box-shadow:0 20px 60px rgba(0,0,0,.3);
-    max-width:800px;
-    width:100%;
-    padding:30px;
 }
-
-h1{text-align:center;color:#667eea;margin-bottom:20px}
 
 .screen{display:none}
 .screen.active{display:block}
 
 .btn{
-    background:linear-gradient(135deg,#667eea,#764ba2);
-    color:#fff;
+    padding:12px;
     border:none;
-    padding:12px 20px;
-    border-radius:15px;
+    border-radius:10px;
+    background:#667eea;
+    color:#fff;
     cursor:pointer;
     margin:5px;
-    width:100%;
 }
 
-.btn-small{width:auto;padding:8px 15px;font-size:14px}
-
-.room-code{
-    text-align:center;
-    font-size:28px;
-    font-weight:bold;
-    color:#667eea;
-    background:#f5f5f5;
-    padding:15px;
-    border-radius:12px;
-    letter-spacing:4px;
-    margin:15px 0;
-    cursor:pointer;
-}
-
-.players{
+.players-grid{
     display:grid;
     grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
     gap:10px;
-    margin:15px 0;
 }
 
 .player{
-    background:#eee;
     padding:10px;
     border-radius:10px;
+    background:#eee;
     text-align:center;
+    cursor:pointer;
 }
 
-.timer{
-    font-size:40px;
-    text-align:center;
-    margin:15px 0;
-    color:#667eea;
-}
-
-.phrase{
-    text-align:center;
-    font-size:26px;
-    padding:15px;
-    border:2px dashed #667eea;
-    margin:15px 0;
-    display:none;
-}
-
-.score{
-    display:flex;
-    justify-content:space-around;
-    margin:10px 0;
+.player.selected{
+    background:#4caf50;
+    color:#fff;
 }
 </style>
 </head>
@@ -99,24 +58,26 @@ h1{text-align:center;color:#667eea;margin-bottom:20px}
 <body>
 
 <div class="container">
+
 <h1>Word Game</h1>
 
 <!-- MENU -->
 <div id="menu" class="screen active">
     <input id="nickname" placeholder="Nickname">
-    <button class="btn" onclick="createRoom()">Create Room</button>
-
-    <input id="roomCodeInput" placeholder="Room code">
-    <button class="btn" onclick="joinRoom()">Join Room</button>
+    <button class="btn" onclick="createRoom()">Create</button>
+    <input id="roomCode" placeholder="Room code">
+    <button class="btn" onclick="joinRoom()">Join</button>
 </div>
 
 <!-- LOBBY -->
 <div id="lobby" class="screen">
     <h2>Lobby</h2>
 
-    <div class="room-code" onclick="copyCode()" id="roomCodeBox">------</div>
+    <div>
+        Room code: <b id="roomCodeDisplay">---</b>
+    </div>
 
-    <div id="players" class="players"></div>
+    <div id="playersLobby"></div>
 
     <button class="btn" id="startBtn" onclick="startGame()">Start Game</button>
 </div>
@@ -124,22 +85,15 @@ h1{text-align:center;color:#667eea;margin-bottom:20px}
 <!-- GAME -->
 <div id="game" class="screen">
 
-    <div class="timer" id="timer">60</div>
+    <div class="timer" id="timer">0</div>
 
-    <div class="phrase" id="phraseBox"></div>
+    <div class="phrase" id="phraseBox" style="display:none"></div>
 
-    <h3 style="text-align:center">Vote player</h3>
-    <div class="players" id="votePlayers"></div>
+    <h3>Vote:</h3>
+    <div class="players-grid" id="playersVote"></div>
 
-    <button class="btn" onclick="sendVote()">Send vote</button>
+    <button class="btn" onclick="sendVote()">Send Vote</button>
 
-    <div class="score" id="scoreBoard"></div>
-</div>
-
-<!-- END -->
-<div id="end" class="screen">
-    <h2 style="text-align:center">Game Over</h2>
-    <div id="results"></div>
 </div>
 
 </div>
@@ -149,20 +103,21 @@ h1{text-align:center;color:#667eea;margin-bottom:20px}
 let ws;
 let roomCode;
 let playerId;
-let players = [];
 let selectedVote = null;
+let players = [];
+let isHost = false;
 
-// =========================
+// NAV
 function show(id){
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
     document.getElementById(id).classList.add('active');
 }
 
-// ========================= CREATE
+// CREATE
 async function createRoom(){
     const nick = document.getElementById("nickname").value;
 
-    const res = await fetch("/api/rooms/create",{
+    const res = await fetch("/api/rooms/create", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({host_nickname:nick})
@@ -172,100 +127,104 @@ async function createRoom(){
 
     roomCode = data.room_code;
     playerId = data.player_id;
+    isHost = true;
 
-    document.getElementById("roomCodeBox").innerText = roomCode;
+    document.getElementById("roomCodeDisplay").innerText = roomCode;
 
     connectWS();
     show("lobby");
+
     updateLobby();
 }
 
-// ========================= JOIN
+// JOIN
 async function joinRoom(){
     const nick = document.getElementById("nickname").value;
-    const code = document.getElementById("roomCodeInput").value;
+    const code = document.getElementById("roomCode").value;
 
-    const res = await fetch("/api/rooms/join",{
+    const res = await fetch("/api/rooms/join", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({nickname:nick,room_code:code})
+        body:JSON.stringify({nickname:nick, room_code:code})
     });
 
     const data = await res.json();
 
     roomCode = code;
     playerId = data.player_id;
+    isHost = false;
 
-    document.getElementById("roomCodeBox").innerText = roomCode;
+    document.getElementById("roomCodeDisplay").innerText = roomCode;
 
     connectWS();
     show("lobby");
+
     updateLobby();
 }
 
-// ========================= WS
+// WS
 function connectWS(){
-    const protocol = location.protocol === "https:" ? "wss" : "ws";
-
-    ws = new WebSocket(`${protocol}://${location.host}/ws/${roomCode}/${playerId}`);
+    ws = new WebSocket(`ws://${location.host}/ws/${roomCode}/${playerId}`);
 
     ws.onmessage = (e)=>{
-        handle(JSON.parse(e.data));
+        const msg = JSON.parse(e.data);
+
+        if(msg.type === "player_joined"){
+            updateLobby();
+        }
+
+        if(msg.type === "start_voting"){
+            show("game");
+            document.getElementById("phraseBox").style.display = "block";
+            document.getElementById("phraseBox").innerText = msg.data.phrase;
+            renderPlayersVote();
+        }
+
+        if(msg.type === "timer_update"){
+            document.getElementById("timer").innerText = msg.data.seconds;
+        }
+
+        if(msg.type === "reveal_author"){
+            alert("Author: " + msg.data.author);
+        }
+
+        if(msg.type === "game_end"){
+            alert("Winner: " + msg.data.winner);
+        }
     };
 }
 
-// ========================= HANDLE
-function handle(m){
-
-    if(m.type === "start_voting"){
-        show("game");
-
-        document.getElementById("phraseBox").style.display = "block";
-        document.getElementById("phraseBox").innerText = m.data.phrase;
-
-        renderVotePlayers();
-    }
-
-    if(m.type === "timer_update"){
-        document.getElementById("timer").innerText = m.data.seconds;
-    }
-
-    if(m.type === "reveal_author"){
-        alert("Author: " + m.data.author);
-    }
-
-    if(m.type === "game_end"){
-        show("end");
-        document.getElementById("results").innerText =
-            JSON.stringify(m.data.final_scores, null, 2);
-    }
-}
-
-// ========================= LOBBY
+// LOBBY
 async function updateLobby(){
     const res = await fetch(`/api/rooms/${roomCode}`);
     const data = await res.json();
 
     players = data.players;
 
-    const box = document.getElementById("players");
-    box.innerHTML = "";
+    const container = document.getElementById("playersLobby");
+    container.innerHTML = "";
 
     players.forEach(p=>{
         const div = document.createElement("div");
         div.className = "player";
-        div.innerText = `${p.nickname} (${p.score})`;
-        box.appendChild(div);
+        div.innerText = p.nickname;
+        container.appendChild(div);
     });
 
-    document.getElementById("startBtn").style.display =
-        players.length >= 2 ? "block" : "none";
+    const btn = document.getElementById("startBtn");
+
+    if(!isHost){
+        btn.style.display = "none";
+    } else {
+        btn.style.display = "block";
+        btn.disabled = players.length < 2;
+    }
 }
 
-// ========================= VOTE UI
-function renderVotePlayers(){
-    const box = document.getElementById("votePlayers");
-    box.innerHTML = "";
+// VOTE UI
+function renderPlayersVote(){
+    const container = document.getElementById("playersVote");
+    container.innerHTML = "";
 
     players.forEach(p=>{
         const div = document.createElement("div");
@@ -274,33 +233,25 @@ function renderVotePlayers(){
 
         div.onclick = ()=>{
             selectedVote = p.id;
-            document.querySelectorAll(".player").forEach(x=>x.style.border="none");
-            div.style.border = "2px solid #4caf50";
+            document.querySelectorAll(".player").forEach(x=>x.classList.remove("selected"));
+            div.classList.add("selected");
         };
 
-        box.appendChild(div);
+        container.appendChild(div);
     });
 }
 
-// ========================= VOTE
+// SEND VOTE
 function sendVote(){
-    if(!selectedVote) return alert("Pick player");
-
     ws.send(JSON.stringify({
         type:"vote",
-        data:{voted_player_id:selectedVote}
+        data:{ voted_player_id:selectedVote }
     }));
 }
 
-// ========================= START
+// START
 function startGame(){
     ws.send(JSON.stringify({type:"start_game"}));
-}
-
-// ========================= COPY
-function copyCode(){
-    navigator.clipboard.writeText(roomCode);
-    alert("Copied!");
 }
 
 </script>
