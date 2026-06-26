@@ -1,14 +1,19 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
+
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+
+import random
 
 from database import SessionLocal, Base, engine, Room, Player
 from game_manager import manager, GameLogic
 
-import json
 
 # =========================
-# APP INIT
+# APP
 # =========================
 app = FastAPI()
 
@@ -26,7 +31,18 @@ game = GameLogic(SessionLocal)
 
 
 # =========================
-# DB DEPENDENCY
+# STATIC (HTML FRONTEND)
+# =========================
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.get("/")
+def root():
+    return RedirectResponse("/static/game.html")
+
+
+# =========================
+# DB
 # =========================
 def get_db():
     db = SessionLocal()
@@ -37,11 +53,83 @@ def get_db():
 
 
 # =========================
-# API: GET ROOM INFO
+# MODELS (API)
+# =========================
+class CreateRoom(BaseModel):
+    host_nickname: str
+
+
+class JoinRoom(BaseModel):
+    room_code: str
+    nickname: str
+
+
+# =========================
+# CREATE ROOM
+# =========================
+@app.post("/api/rooms/create")
+def create_room(data: CreateRoom, db: Session = Depends(get_db)):
+    room = Room(
+        code=str(random.randint(100000, 999999)),
+        host_player_id=None,
+        is_active=True
+    )
+
+    db.add(room)
+    db.commit()
+    db.refresh(room)
+
+    player = Player(
+        nickname=data.host_nickname,
+        room_id=room.id,
+        avatar_color="#4A90D9"
+    )
+
+    db.add(player)
+    db.commit()
+    db.refresh(player)
+
+    room.host_player_id = player.id
+    db.commit()
+
+    return {
+        "room_code": room.code,
+        "player_id": player.id
+    }
+
+
+# =========================
+# JOIN ROOM
+# =========================
+@app.post("/api/rooms/join")
+def join_room(data: JoinRoom, db: Session = Depends(get_db)):
+    room = db.query(Room).filter(Room.code == data.room_code).first()
+
+    if not room:
+        return {"error": "Room not found"}
+
+    player = Player(
+        nickname=data.nickname,
+        room_id=room.id,
+        avatar_color="#FF6B6B"
+    )
+
+    db.add(player)
+    db.commit()
+    db.refresh(player)
+
+    return {
+        "player_id": player.id
+    }
+
+
+# =========================
+# ROOM INFO (LOBBY REFRESH)
 # =========================
 @app.get("/api/rooms/{room_code}")
 def get_room(room_code: str, db: Session = Depends(get_db)):
     room = db.query(Room).filter(Room.code == room_code).first()
+
     if not room:
         return {"error": "Room not found"}
 
@@ -50,16 +138,12 @@ def get_room(room_code: str, db: Session = Depends(get_db)):
     return {
         "room_code": room.code,
         "host_player_id": room.host_player_id,
-        "category": getattr(room, "category", "Mixed"),
-        "max_rounds": getattr(room, "max_rounds", 10),
-        "timer_seconds": getattr(room, "timer_seconds", 60),
         "players": [
             {
                 "id": p.id,
                 "nickname": p.nickname,
                 "score": p.score,
-                "avatar_color": p.avatar_color,
-                "is_explaining": getattr(p, "is_explaining", False)
+                "avatar_color": p.avatar_color
             }
             for p in players
         ]
@@ -80,46 +164,32 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
         })
 
         while True:
-            data = await websocket.receive_text()
+            data = await websocket.receive_json()
 
-            try:
-                msg = json.loads(data)
-            except:
-                continue
+            msg_type = data.get("type")
+            payload = data.get("data", {})
 
-            msg_type = msg.get("type")
-            data = msg.get("data", {})
-
-            # =========================
             # START GAME
-            # =========================
             if msg_type == "start_game":
                 await game.start_game(room_code)
 
-            # =========================
             # CHAT
-            # =========================
             elif msg_type == "chat":
                 await manager.broadcast_to_room(room_code, {
                     "type": "chat_message",
                     "data": {
                         "player_id": player_id,
-                        "message": data.get("message", "")
+                        "message": payload.get("message", "")
                     }
                 })
 
-            # =========================
             # VOTE
-            # =========================
             elif msg_type == "vote":
-                voted_player_id = data.get("voted_player_id")
-
-                if voted_player_id is not None:
-                    await game.handle_vote(
-                        room_code,
-                        voter_id=player_id,
-                        voted_player_id=voted_player_id
-                    )
+                await game.handle_vote(
+                    room_code,
+                    voter_id=player_id,
+                    voted_player_id=payload.get("voted_player_id")
+                )
 
     except WebSocketDisconnect:
         manager.disconnect(room_code, player_id)
