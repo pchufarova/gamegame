@@ -191,9 +191,9 @@ class GameState(Base):
 # =========================
 # Создание БД
 # =========================
-# if os.path.exists("game.db"):
-#     os.remove("game.db")
-#     print("🗑️ Старая база удалена")
+if os.path.exists("game.db"):
+    os.remove("game.db")
+    print("🗑️ Старая база удалена")
 
 Base.metadata.create_all(bind=engine)
 print("✅ Новая база создана")
