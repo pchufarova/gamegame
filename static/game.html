@@ -164,7 +164,7 @@ async function joinRoom(){
 
 // WS
 function connectWS(){
-    ws = new WebSocket(`ws://${location.host}/ws/${roomCode}/${playerId}`);
+    ws = new WebSocket(`wss://${location.host}/ws/${roomCode}/${playerId}`);
 
     ws.onmessage = (e)=>{
         const msg = JSON.parse(e.data);
