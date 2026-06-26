@@ -190,12 +190,40 @@ function connectWS(){
     const msg = JSON.parse(e.data);
 
     if (msg.type === "player_joined" || msg.type === "player_left") {
-        updateLobby(); // <- ключевой фикс
+        updateLobby();
         return;
     }
 
-    handle(msg);
+    if (msg.type === "start_collecting") {
+        show("game");
+        document.getElementById("collectBox").style.display = "block";
+        document.getElementById("playersVote").innerHTML = "";
+        return;
+    }
+
+    if (msg.type === "timer_update") {
+        document.getElementById("timer").innerText = msg.data.seconds;
+        return;
+    }
+
+    if (msg.type === "start_voting") {
+        document.getElementById("collectBox").style.display = "none";
+        renderPlayersVote();
+        return;
+    }
+
+    if (msg.type === "reveal_author") {
+        alert(`Фраза: ${msg.data.phrase}\nАвтор: ${msg.data.author}`);
+        return;
+    }
+
+    if (msg.type === "game_end") {
+        alert("Игра окончена");
+        console.log(msg.data);
+        return;
+    }
 };
+
 }
 
 // LOBBY
