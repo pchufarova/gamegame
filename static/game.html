@@ -61,7 +61,6 @@ body{
 
 <h1>Word Game</h1>
 
-<!-- MENU -->
 <div id="menu" class="screen active">
     <input id="nickname" placeholder="Nickname">
     <button class="btn" onclick="createRoom()">Create</button>
@@ -69,31 +68,24 @@ body{
     <button class="btn" onclick="joinRoom()">Join</button>
 </div>
 
-<!-- LOBBY -->
 <div id="lobby" class="screen">
     <h2>Lobby</h2>
 
-    <div>
-        Room code: <b id="roomCodeDisplay">---</b>
-    </div>
+    <div>Room: <b id="roomCodeDisplay">---</b></div>
 
     <div id="playersLobby"></div>
 
     <button class="btn" id="startBtn" onclick="startGame()">Start Game</button>
 </div>
 
-<!-- GAME -->
 <div id="game" class="screen">
+    <div id="timer">0</div>
 
-    <div class="timer" id="timer">0</div>
+    <div id="phraseBox" style="display:none"></div>
 
-    <div class="phrase" id="phraseBox" style="display:none"></div>
-
-    <h3>Vote:</h3>
     <div class="players-grid" id="playersVote"></div>
 
-    <button class="btn" onclick="sendVote()">Send Vote</button>
-
+    <button class="btn" onclick="sendVote()">Vote</button>
 </div>
 
 </div>
@@ -103,8 +95,8 @@ body{
 let ws;
 let roomCode;
 let playerId;
-let selectedVote = null;
 let players = [];
+let selectedVote = null;
 let isHost = false;
 
 // NAV
@@ -132,9 +124,11 @@ async function createRoom(){
     document.getElementById("roomCodeDisplay").innerText = roomCode;
 
     connectWS();
-    show("lobby");
 
-    updateLobby();
+    ws.onopen = async ()=>{
+        show("lobby");
+        await updateLobby();
+    };
 }
 
 // JOIN
@@ -157,13 +151,17 @@ async function joinRoom(){
     document.getElementById("roomCodeDisplay").innerText = roomCode;
 
     connectWS();
-    show("lobby");
 
-    updateLobby();
+    ws.onopen = async ()=>{
+        show("lobby");
+        await updateLobby();
+    };
 }
 
-// WS
+// 🔥 FIXED WSS CONNECT (ВАЖНО)
 function connectWS(){
+    if(ws) ws.close();
+
     ws = new WebSocket(`wss://${location.host}/ws/${roomCode}/${playerId}`);
 
     ws.onmessage = (e)=>{
@@ -183,14 +181,10 @@ function connectWS(){
         if(msg.type === "timer_update"){
             document.getElementById("timer").innerText = msg.data.seconds;
         }
+    };
 
-        if(msg.type === "reveal_author"){
-            alert("Author: " + msg.data.author);
-        }
-
-        if(msg.type === "game_end"){
-            alert("Winner: " + msg.data.winner);
-        }
+    ws.onclose = ()=>{
+        console.log("WS closed");
     };
 }
 
@@ -223,35 +217,39 @@ async function updateLobby(){
 
 // VOTE UI
 function renderPlayersVote(){
-    const container = document.getElementById("playersVote");
-    container.innerHTML = "";
+    const c = document.getElementById("playersVote");
+    c.innerHTML = "";
 
     players.forEach(p=>{
-        const div = document.createElement("div");
-        div.className = "player";
-        div.innerText = p.nickname;
+        const d = document.createElement("div");
+        d.className = "player";
+        d.innerText = p.nickname;
 
-        div.onclick = ()=>{
+        d.onclick = ()=>{
             selectedVote = p.id;
             document.querySelectorAll(".player").forEach(x=>x.classList.remove("selected"));
-            div.classList.add("selected");
+            d.classList.add("selected");
         };
 
-        container.appendChild(div);
+        c.appendChild(d);
     });
 }
 
 // SEND VOTE
 function sendVote(){
-    ws.send(JSON.stringify({
-        type:"vote",
-        data:{ voted_player_id:selectedVote }
-    }));
+    if(ws && ws.readyState === WebSocket.OPEN){
+        ws.send(JSON.stringify({
+            type:"vote",
+            data:{ voted_player_id:selectedVote }
+        }));
+    }
 }
 
-// START
+// START GAME
 function startGame(){
-    ws.send(JSON.stringify({type:"start_game"}));
+    if(ws && ws.readyState === WebSocket.OPEN){
+        ws.send(JSON.stringify({type:"start_game"}));
+    }
 }
 
 </script>

@@ -94,9 +94,7 @@ def join_room(data: JoinRoom, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(player)
 
-    return {
-        "player_id": player.id
-    }
+    return {"player_id": player.id}
 
 
 @app.get("/api/rooms/{room_code}")
@@ -127,9 +125,7 @@ def get_room(room_code: str, db: Session = Depends(get_db)):
 async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: int):
     await manager.connect(room_code, player_id, websocket)
 
-    await manager.broadcast_to_room(room_code, {
-        "type": "player_joined"
-    })
+    await manager.broadcast_to_room(room_code, {"type": "player_joined"})
 
     try:
         while True:
@@ -137,6 +133,7 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
             msg_type = data.get("type")
             payload = data.get("data", {})
 
+            # START GAME (ТОЛЬКО HOST)
             if msg_type == "start_game":
                 db = SessionLocal()
                 room = db.query(Room).filter(Room.code == room_code).first()
@@ -155,6 +152,4 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
     except WebSocketDisconnect:
         manager.disconnect(room_code, player_id)
 
-        await manager.broadcast_to_room(room_code, {
-            "type": "player_left"
-        })
+        await manager.broadcast_to_room(room_code, {"type": "player_left"})
