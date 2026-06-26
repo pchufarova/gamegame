@@ -2,12 +2,15 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+
 import random
 
 from database import SessionLocal, Base, engine, Room, Player
 from game_manager import manager, GameLogic
+
 
 app = FastAPI()
 
@@ -22,6 +25,7 @@ app.add_middleware(
 Base.metadata.create_all(bind=engine)
 
 game = GameLogic(SessionLocal)
+
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -55,6 +59,7 @@ def create_room(data: CreateRoom, db: Session = Depends(get_db)):
         host_player_id=None,
         is_active=True
     )
+
     db.add(room)
     db.commit()
     db.refresh(room)
@@ -64,6 +69,7 @@ def create_room(data: CreateRoom, db: Session = Depends(get_db)):
         room_id=room.id,
         avatar_color="#4A90D9"
     )
+
     db.add(player)
     db.commit()
     db.refresh(player)
@@ -125,22 +131,22 @@ def get_room(room_code: str, db: Session = Depends(get_db)):
 async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: int):
     await manager.connect(room_code, player_id, websocket)
 
-    await manager.broadcast_to_room(room_code, {"type": "player_joined"})
-
     try:
+        await manager.broadcast_to_room(room_code, {
+            "type": "player_joined",
+            "data": {"player_id": player_id}
+        })
+
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type")
             payload = data.get("data", {})
 
-            # START GAME (ТОЛЬКО HOST)
             if msg_type == "start_game":
-                db = SessionLocal()
-                room = db.query(Room).filter(Room.code == room_code).first()
-                db.close()
-
-                if room and room.host_player_id == player_id:
-                    await game.start_game(room_code)
+                # 🔥 защита от повторного старта
+                if room_code in game.room_phrases:
+                    continue
+                await game.start_game(room_code)
 
             elif msg_type == "vote":
                 await game.handle_vote(
@@ -152,4 +158,11 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
     except WebSocketDisconnect:
         manager.disconnect(room_code, player_id)
 
-        await manager.broadcast_to_room(room_code, {"type": "player_left"})
+        await manager.broadcast_to_room(room_code, {
+            "type": "player_left",
+            "data": {"player_id": player_id}
+        })
+
+    except Exception as e:
+        manager.disconnect(room_code, player_id)
+        print("WS ERROR:", e)

@@ -158,33 +158,36 @@ async function joinRoom(){
     };
 }
 
-// 🔥 FIXED WSS CONNECT (ВАЖНО)
 function connectWS(){
-    if(ws) ws.close();
 
-    ws = new WebSocket(`wss://${location.host}/ws/${roomCode}/${playerId}`);
+    // ❗ защита от повторного подключения
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        console.log("WS already connected");
+        return;
+    }
 
-    ws.onmessage = (e)=>{
-        const msg = JSON.parse(e.data);
+    if (ws) {
+        try { ws.close(); } catch(e) {}
+    }
 
-        if(msg.type === "player_joined"){
-            updateLobby();
-        }
+    const url = `wss://${location.host}/ws/${roomCode}/${playerId}`;
 
-        if(msg.type === "start_voting"){
-            show("game");
-            document.getElementById("phraseBox").style.display = "block";
-            document.getElementById("phraseBox").innerText = msg.data.phrase;
-            renderPlayersVote();
-        }
+    ws = new WebSocket(url);
 
-        if(msg.type === "timer_update"){
-            document.getElementById("timer").innerText = msg.data.seconds;
-        }
+    ws.onopen = () => {
+        console.log("WS connected");
     };
 
-    ws.onclose = ()=>{
+    ws.onclose = () => {
         console.log("WS closed");
+    };
+
+    ws.onerror = (e) => {
+        console.log("WS error", e);
+    };
+
+    ws.onmessage = (e) => {
+        handle(JSON.parse(e.data));
     };
 }
 
@@ -245,11 +248,15 @@ function sendVote(){
     }
 }
 
-// START GAME
 function startGame(){
-    if(ws && ws.readyState === WebSocket.OPEN){
-        ws.send(JSON.stringify({type:"start_game"}));
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        console.log("WS not ready");
+        return;
     }
+
+    ws.send(JSON.stringify({
+        type: "start_game"
+    }));
 }
 
 </script>
