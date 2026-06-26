@@ -4,7 +4,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
 
 import random
 
@@ -26,7 +25,6 @@ Base.metadata.create_all(bind=engine)
 
 game = GameLogic(SessionLocal)
 
-
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -43,17 +41,11 @@ def get_db():
         db.close()
 
 
-class CreateRoom(BaseModel):
-    host_nickname: str
-
-
-class JoinRoom(BaseModel):
-    room_code: str
-    nickname: str
-
-
+# =========================
+# CREATE ROOM
+# =========================
 @app.post("/api/rooms/create")
-def create_room(data: CreateRoom, db: Session = Depends(get_db)):
+def create_room(data: dict, db: Session = Depends(get_db)):
     room = Room(
         code=str(random.randint(100000, 999999)),
         host_player_id=None,
@@ -65,7 +57,7 @@ def create_room(data: CreateRoom, db: Session = Depends(get_db)):
     db.refresh(room)
 
     player = Player(
-        nickname=data.host_nickname,
+        nickname=data["host_nickname"],
         room_id=room.id,
         avatar_color="#4A90D9"
     )
@@ -83,15 +75,18 @@ def create_room(data: CreateRoom, db: Session = Depends(get_db)):
     }
 
 
+# =========================
+# JOIN ROOM
+# =========================
 @app.post("/api/rooms/join")
-def join_room(data: JoinRoom, db: Session = Depends(get_db)):
-    room = db.query(Room).filter(Room.code == data.room_code).first()
+def join_room(data: dict, db: Session = Depends(get_db)):
+    room = db.query(Room).filter(Room.code == data["room_code"]).first()
 
     if not room:
         return {"error": "Room not found"}
 
     player = Player(
-        nickname=data.nickname,
+        nickname=data["nickname"],
         room_id=room.id,
         avatar_color="#FF6B6B"
     )
@@ -103,12 +98,12 @@ def join_room(data: JoinRoom, db: Session = Depends(get_db)):
     return {"player_id": player.id}
 
 
+# =========================
+# ROOM INFO
+# =========================
 @app.get("/api/rooms/{room_code}")
 def get_room(room_code: str, db: Session = Depends(get_db)):
     room = db.query(Room).filter(Room.code == room_code).first()
-
-    if not room:
-        return {"error": "Room not found"}
 
     players = db.query(Player).filter(Player.room_id == room.id).all()
 
@@ -127,23 +122,48 @@ def get_room(room_code: str, db: Session = Depends(get_db)):
     }
 
 
+# =========================
+# WEBSOCKET
+# =========================
 @app.websocket("/ws/{room_code}/{player_id}")
 async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: int):
     await manager.connect(room_code, player_id, websocket)
 
+    #  функция синка игроков
+    async def send_players_state():
+        db = SessionLocal()
+        try:
+            room = db.query(Room).filter(Room.code == room_code).first()
+            players = db.query(Player).filter(Player.room_id == room.id).all()
+
+            await manager.broadcast_to_room(room_code, {
+                "type": "players_update",
+                "data": {
+                    "players": [
+                        {
+                            "id": p.id,
+                            "nickname": p.nickname,
+                            "score": p.score,
+                            "avatar_color": p.avatar_color
+                        }
+                        for p in players
+                    ]
+                }
+            })
+        finally:
+            db.close()
+
     try:
-        await manager.broadcast_to_room(room_code, {
-            "type": "player_joined",
-            "data": {"player_id": player_id}
-        })
+        #  сразу синхронизируем всех
+        await send_players_state()
 
         while True:
             data = await websocket.receive_json()
+
             msg_type = data.get("type")
             payload = data.get("data", {})
 
             if msg_type == "start_game":
-                # 🔥 защита от повторного старта
                 if room_code in game.room_phrases:
                     continue
                 await game.start_game(room_code)
@@ -151,18 +171,13 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
             elif msg_type == "vote":
                 await game.handle_vote(
                     room_code,
-                    voter_id=player_id,
-                    voted_player_id=payload.get("voted_player_id")
+                    player_id,
+                    payload.get("voted_player_id")
                 )
+
+            #  после любого действия обновляем список игроков
+            await send_players_state()
 
     except WebSocketDisconnect:
         manager.disconnect(room_code, player_id)
-
-        await manager.broadcast_to_room(room_code, {
-            "type": "player_left",
-            "data": {"player_id": player_id}
-        })
-
-    except Exception as e:
-        manager.disconnect(room_code, player_id)
-        print("WS ERROR:", e)
+        await send_players_state()

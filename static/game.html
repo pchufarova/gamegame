@@ -52,7 +52,22 @@ body{
     background:#4caf50;
     color:#fff;
 }
+
+.timer{
+    font-size:40px;
+    text-align:center;
+    margin:20px;
+}
+
+.phrase{
+    font-size:28px;
+    text-align:center;
+    padding:20px;
+    border:2px dashed #667eea;
+    margin:20px 0;
+}
 </style>
+
 </head>
 
 <body>
@@ -61,6 +76,7 @@ body{
 
 <h1>Word Game</h1>
 
+<!-- MENU -->
 <div id="menu" class="screen active">
     <input id="nickname" placeholder="Nickname">
     <button class="btn" onclick="createRoom()">Create</button>
@@ -68,24 +84,33 @@ body{
     <button class="btn" onclick="joinRoom()">Join</button>
 </div>
 
+<!-- LOBBY -->
 <div id="lobby" class="screen">
     <h2>Lobby</h2>
-
-    <div>Room: <b id="roomCodeDisplay">---</b></div>
 
     <div id="playersLobby"></div>
 
     <button class="btn" id="startBtn" onclick="startGame()">Start Game</button>
 </div>
 
+<!-- GAME -->
 <div id="game" class="screen">
-    <div id="timer">0</div>
 
-    <div id="phraseBox" style="display:none"></div>
+    <div class="timer" id="timer">0</div>
 
+    <div class="phrase" id="phraseBox" style="display:none"></div>
+
+    <h3>Vote:</h3>
     <div class="players-grid" id="playersVote"></div>
 
-    <button class="btn" onclick="sendVote()">Vote</button>
+    <button class="btn" onclick="sendVote()">Send Vote</button>
+
+</div>
+
+<!-- END -->
+<div id="end" class="screen">
+    <h2>Game Over</h2>
+    <div id="results"></div>
 </div>
 
 </div>
@@ -95,17 +120,23 @@ body{
 let ws;
 let roomCode;
 let playerId;
+
 let players = [];
 let selectedVote = null;
+
 let isHost = false;
 
+// =========================
 // NAV
+// =========================
 function show(id){
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
     document.getElementById(id).classList.add('active');
 }
 
-// CREATE
+// =========================
+// CREATE / JOIN
+// =========================
 async function createRoom(){
     const nick = document.getElementById("nickname").value;
 
@@ -119,19 +150,11 @@ async function createRoom(){
 
     roomCode = data.room_code;
     playerId = data.player_id;
-    isHost = true;
-
-    document.getElementById("roomCodeDisplay").innerText = roomCode;
 
     connectWS();
-
-    ws.onopen = async ()=>{
-        show("lobby");
-        await updateLobby();
-    };
+    show("lobby");
 }
 
-// JOIN
 async function joinRoom(){
     const nick = document.getElementById("nickname").value;
     const code = document.getElementById("roomCode").value;
@@ -146,57 +169,67 @@ async function joinRoom(){
 
     roomCode = code;
     playerId = data.player_id;
-    isHost = false;
-
-    document.getElementById("roomCodeDisplay").innerText = roomCode;
 
     connectWS();
-
-    ws.onopen = async ()=>{
-        show("lobby");
-        await updateLobby();
-    };
+    show("lobby");
 }
 
+// =========================
+// WS (FIXED)
+// =========================
 function connectWS(){
 
-    // ❗ защита от повторного подключения
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-        console.log("WS already connected");
         return;
     }
 
-    if (ws) {
-        try { ws.close(); } catch(e) {}
-    }
+    if (ws) ws.close();
 
-    const url = `wss://${location.host}/ws/${roomCode}/${playerId}`;
+    ws = new WebSocket(`wss://${location.host}/ws/${roomCode}/${playerId}`);
 
-    ws = new WebSocket(url);
-
-    ws.onopen = () => {
-        console.log("WS connected");
-    };
-
-    ws.onclose = () => {
-        console.log("WS closed");
-    };
-
-    ws.onerror = (e) => {
-        console.log("WS error", e);
-    };
-
-    ws.onmessage = (e) => {
+    ws.onmessage = (e)=>{
         handle(JSON.parse(e.data));
     };
 }
 
-// LOBBY
-async function updateLobby(){
-    const res = await fetch(`/api/rooms/${roomCode}`);
-    const data = await res.json();
+// =========================
+// HANDLE
+// =========================
+function handle(msg){
 
-    players = data.players;
+    if(msg.type === "players_update"){
+        players = msg.data.players;
+        renderLobby();
+        renderVotePlayers();
+    }
+
+    if(msg.type === "start_voting"){
+        show("game");
+        document.getElementById("phraseBox").style.display = "block";
+        document.getElementById("phraseBox").innerText = msg.data.phrase;
+
+        renderVotePlayers();
+    }
+
+    if(msg.type === "timer_update"){
+        document.getElementById("timer").innerText = msg.data.seconds;
+    }
+
+    if(msg.type === "reveal_author"){
+        alert("Author: " + msg.data.author);
+    }
+
+    if(msg.type === "game_end"){
+        show("end");
+        document.getElementById("results").innerText =
+            JSON.stringify(msg.data.final_scores, null, 2);
+    }
+}
+
+// =========================
+// LOBBY RENDER (FIXED)
+// =========================
+function renderLobby(){
 
     const container = document.getElementById("playersLobby");
     container.innerHTML = "";
@@ -208,54 +241,59 @@ async function updateLobby(){
         container.appendChild(div);
     });
 
-    const btn = document.getElementById("startBtn");
+    // host logic
+    const startBtn = document.getElementById("startBtn");
 
-    if(!isHost){
-        btn.style.display = "none";
+    const me = players.find(p=>p.id === playerId);
+    isHost = me && players.length > 0 && players[0].id === playerId;
+
+    if(isHost){
+        startBtn.style.display = "block";
+        startBtn.disabled = players.length < 2;
     } else {
-        btn.style.display = "block";
-        btn.disabled = players.length < 2;
+        startBtn.style.display = "none";
     }
 }
 
-// VOTE UI
-function renderPlayersVote(){
-    const c = document.getElementById("playersVote");
-    c.innerHTML = "";
+// =========================
+// VOTE RENDER
+// =========================
+function renderVotePlayers(){
+
+    const container = document.getElementById("playersVote");
+    container.innerHTML = "";
 
     players.forEach(p=>{
-        const d = document.createElement("div");
-        d.className = "player";
-        d.innerText = p.nickname;
+        const div = document.createElement("div");
+        div.className = "player";
+        div.innerText = p.nickname;
 
-        d.onclick = ()=>{
+        div.onclick = ()=>{
             selectedVote = p.id;
-            document.querySelectorAll(".player").forEach(x=>x.classList.remove("selected"));
-            d.classList.add("selected");
         };
 
-        c.appendChild(d);
+        container.appendChild(div);
     });
 }
 
-// SEND VOTE
-function sendVote(){
+// =========================
+// START GAME
+// =========================
+function startGame(){
     if(ws && ws.readyState === WebSocket.OPEN){
-        ws.send(JSON.stringify({
-            type:"vote",
-            data:{ voted_player_id:selectedVote }
-        }));
+        ws.send(JSON.stringify({type:"start_game"}));
     }
 }
 
-function startGame(){
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-        console.log("WS not ready");
-        return;
-    }
+// =========================
+// VOTE
+// =========================
+function sendVote(){
+    if(!selectedVote) return;
 
     ws.send(JSON.stringify({
-        type: "start_game"
+        type:"vote",
+        data:{voted_player_id:selectedVote}
     }));
 }
 
