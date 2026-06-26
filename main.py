@@ -26,7 +26,6 @@ Base.metadata.create_all(bind=engine)
 
 game = GameLogic(SessionLocal)
 
-
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -127,6 +126,9 @@ def get_room(room_code: str, db: Session = Depends(get_db)):
     }
 
 
+# =========================
+# WS
+# =========================
 @app.websocket("/ws/{room_code}/{player_id}")
 async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: int):
     await manager.connect(room_code, player_id, websocket)
@@ -142,18 +144,49 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
             msg_type = data.get("type")
             payload = data.get("data", {})
 
-            if msg_type == "start_game":
-                # 🔥 защита от повторного старта
-                if room_code in game.room_phrases:
-                    continue
-                await game.start_game(room_code)
+            db = SessionLocal()
 
-            elif msg_type == "vote":
-                await game.handle_vote(
-                    room_code,
-                    voter_id=player_id,
-                    voted_player_id=payload.get("voted_player_id")
-                )
+            try:
+                room = db.query(Room).filter(Room.code == room_code).first()
+                if not room:
+                    continue
+
+                # =========================
+                # START GAME
+                # =========================
+                if msg_type == "start_game":
+                    await game.start_game(room_code)
+
+                # =========================
+                # SUBMIT PHRASE (ONLY COLLECTING)
+                # =========================
+                elif msg_type == "submit_phrase":
+                    if not game.collecting.get(room_code, False):
+                        continue
+
+                    from database import Phrase
+
+                    phrase = Phrase(
+                        text=payload.get("text"),
+                        room_id=room.id,
+                        author_id=player_id
+                    )
+
+                    db.add(phrase)
+                    db.commit()
+
+                # =========================
+                # VOTE
+                # =========================
+                elif msg_type == "vote":
+                    await game.handle_vote(
+                        room_code,
+                        voter_id=player_id,
+                        voted_player_id=payload.get("voted_player_id")
+                    )
+
+            finally:
+                db.close()
 
     except WebSocketDisconnect:
         manager.disconnect(room_code, player_id)
