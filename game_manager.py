@@ -203,11 +203,19 @@ class GameLogic:
 
             author = db.query(Player).filter(Player.id == phrase.author_id).first()
 
+            
+            correct_voters = [
+            voter_id
+            for voter_id, voted_id in votes.items()
+            if voted_id == phrase.author_id
+        ]
+
             await manager.broadcast_to_room(room_code, {
                 "type": "reveal_author",
                 "data": {
                     "phrase": phrase.text,
-                    "author": author.nickname
+                    "author": author.nickname,
+                    "correctVoters": correct_voters
                 }
             })
 

@@ -81,9 +81,15 @@ body{
 
     <!-- COLLECTING -->
     <div id="collectBox" class="hidden">
-        <input id="phraseInput" placeholder="Напиши фразу">
-        <button onclick="sendPhrase()">Send</button>
+    <h3>Напиши свою фразу</h3>
+
+    <div style="font-size:20px; margin-bottom:10px;">
+        ⏳ Time: <span id="collectTimer">30</span>
     </div>
+
+    <input id="phraseInput" placeholder="Твоя фраза">
+    <button onclick="sendPhrase()">Send</button>
+</div>
 
     <!-- VOTING -->
     <div id="voteBox" class="hidden">
@@ -132,8 +138,14 @@ function connectWS(){
         }
 
         if(msg.type==="timer_update"){
-            document.getElementById("timer").innerText = msg.data.seconds;
+        document.getElementById("timer").innerText = msg.data.seconds;
+
+        // collecting timer
+        const collectTimer = document.getElementById("collectTimer");
+        if(collectTimer){
+            collectTimer.innerText = msg.data.seconds;
         }
+    }
 
         if(msg.type==="start_voting"){
             document.getElementById("phaseText").innerText = "VOTING";
@@ -148,8 +160,16 @@ function connectWS(){
         }
 
         if(msg.type==="reveal_author"){
-            alert(`Фраза: ${msg.data.phrase}\nАвтор: ${msg.data.author}`);
-        }
+
+    const isYouCorrect =
+        msg.data.correctVoters?.includes(playerId);
+
+    alert(
+        `Фраза: ${msg.data.phrase}\n` +
+        `Автор: ${msg.data.author}\n` +
+        (isYouCorrect ? "🎉 +2 очка!" : "❌ не угадал")
+    );
+}
 
         if(msg.type==="game_end"){
             alert("GAME OVER");
@@ -193,11 +213,30 @@ function renderPlayers(){
 
     players.forEach(p=>{
         const d=document.createElement("div");
+
         d.className="player";
-        d.innerText=p.nickname;
+        d.style.display="flex";
+        d.style.alignItems="center";
+        d.style.gap="10px";
+        d.style.cursor="pointer";
+
+        d.innerHTML=`
+            <div style="
+                width:40px;
+                height:40px;
+                border-radius:50%;
+                background:${p.avatar_color || "#999"};
+            "></div>
+            <div>${p.nickname}</div>
+        `;
 
         d.onclick=()=>{
             selectedVote=p.id;
+
+            document.querySelectorAll("#playersVote .player")
+                .forEach(x=>x.classList.remove("selected"));
+
+            d.classList.add("selected");
         };
 
         c.appendChild(d);
