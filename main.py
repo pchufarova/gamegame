@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 import random
+import asyncio
 
 from database import SessionLocal, Base, engine, Room, Player
 from game_manager import manager, GameLogic
@@ -155,7 +156,13 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
                 # START GAME
                 # =========================
                 if msg_type == "start_game":
-                    await game.start_game(room_code)
+                    # ВАЖНО: запускаем как отдельную задачу, а не await.
+                    # Если делать await здесь, то этот же WS-цикл (а это
+                    # обычно соединение ХОСТА, кто нажал "старт") блокируется
+                    # на время сбора фраз (до 30 сек) и не может в этот момент
+                    # принять собственное сообщение "submit_phrase" — из-за
+                    # этого фраза хоста терялась.
+                    asyncio.create_task(game.start_game(room_code))
 
                 # =========================
                 # SUBMIT PHRASE (ONLY COLLECTING)
@@ -174,6 +181,10 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
 
                     db.add(phrase)
                     db.commit()
+
+                    # отмечаем, что игрок сдал фразу — если все сдали,
+                    # сбор фраз завершится раньше 30 секунд
+                    game.register_phrase(room_code, player_id)
 
                 # =========================
                 # VOTE
