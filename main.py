@@ -164,16 +164,24 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
                     if not game.collecting.get(room_code, False):
                         continue
 
-                    from database import Phrase
+                    text = (payload.get("text") or "").strip()
+                    if not text:
+                        continue
+
+                    # защита от дубля
+                    if player_id in game.submitted.get(room_code, set()):
+                        continue
 
                     phrase = Phrase(
-                        text=payload.get("text"),
+                        text=text,
                         room_id=room.id,
                         author_id=player_id
                     )
 
                     db.add(phrase)
                     db.commit()
+
+                    game.register_phrase(room_code, player_id)
 
                 # =========================
                 # VOTE

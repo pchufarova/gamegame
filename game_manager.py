@@ -102,6 +102,13 @@ class GameLogic:
             phrases = db.query(Phrase).filter(
                 Phrase.room_id == room.id
             ).all()
+            if len(phrases) != len(players):
+                print("❌ NOT ALL PHRASES COLLECTED")
+                print("Players:", len(players))
+                print("Phrases:", len(phrases))
+
+                self._running[room_code] = False
+                return
 
             print("PLAYERS:", len(players))
             print("PHRASES:", len(phrases))
