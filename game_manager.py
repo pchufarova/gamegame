@@ -65,8 +65,6 @@ class GameLogic:
             if len(players) < 2:
                 return
 
-            phrases = db.query(Phrase).filter(Phrase.room_id == room.id).all()
-
             self._running[room_code] = True
 
             # collect phase
@@ -78,8 +76,21 @@ class GameLogic:
             })
 
             await asyncio.sleep(30)
+
             self.collecting[room_code] = False
 
+            phrases = db.query(Phrase).filter(
+                Phrase.room_id == room.id
+            ).all()
+
+            if len(phrases) == 0:
+                self._running[room_code] = False
+                return
+            
+            print("PHRASES:", len(phrases))
+            for p in phrases:
+                print(p.text)
+                
             random.shuffle(phrases)
 
             self.room_phrases[room_code] = phrases
