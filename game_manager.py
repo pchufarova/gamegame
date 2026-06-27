@@ -66,8 +66,6 @@ class GameLogic:
                 return
 
             phrases = db.query(Phrase).filter(Phrase.room_id == room.id).all()
-            if len(phrases) < 1:
-                return
 
             self._running[room_code] = True
 
