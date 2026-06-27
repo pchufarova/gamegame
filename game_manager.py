@@ -84,14 +84,7 @@ class GameLogic:
                 "data": {"seconds": 30}
             })
 
-            # 🔥 ВАЖНО: ждём либо всех игроков, либо 30 сек
-            try:
-                await asyncio.wait_for(
-                    self.collect_done[room_code].wait(),
-                    timeout=30
-                )
-            except asyncio.TimeoutError:
-                pass
+            await self.collect_done[room_code].wait()
 
             self.collecting[room_code] = False
 
