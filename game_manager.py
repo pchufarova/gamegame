@@ -47,6 +47,7 @@ class GameLogic:
         self.votes = {}
         self._tasks = {}
         self._running = {}
+        self.revealing = {}
 
     # ================= START =================
     async def start_game(self, room_code: str):
@@ -90,7 +91,7 @@ class GameLogic:
             print("PHRASES:", len(phrases))
             for p in phrases:
                 print(p.text)
-                
+
             random.shuffle(phrases)
 
             self.room_phrases[room_code] = phrases
@@ -104,6 +105,7 @@ class GameLogic:
 
     # ================= PHRASE =================
     async def _start_phrase(self, room_code: str):
+        self.revealing[room_code] = False
         idx = self.current_index.get(room_code, 0)
         phrases = self.room_phrases.get(room_code, [])
 
@@ -156,27 +158,40 @@ class GameLogic:
         if self._all_voted(room_code):
             await self._reveal(room_code)
 
-    def _all_voted(self, room_code: str) -> bool:
+    def _all_voted(self, room_code):
         db = self.db_session_factory()
+
         try:
-            from database import Player
+            from database import Player, Room
 
-            room_players = db.query(Player).all()
+            room = db.query(Room).filter(
+                Room.code == room_code
+            ).first()
 
-            # только игроки комнаты
-            room_id = None
-            if room_players:
-                room_id = room_players[0].room_id
+            if not room:
+                return False
 
-            room_players = db.query(Player).filter(Player.room_id == room_id).all()
+            players = db.query(Player).filter(
+                Player.room_id == room.id
+            ).all()
 
-            return len(self.votes.get(room_code, {})) >= len(room_players)
+            idx = self.current_index.get(room_code, 0)
+            phrase = self.room_phrases[room_code][idx]
+
+            voters_count = len(players) - 1
+
+            return len(self.votes.get(room_code, {})) >= voters_count
 
         finally:
             db.close()
 
     # ================= REVEAL =================
     async def _reveal(self, room_code: str):
+        if self.revealing.get(room_code):
+            return
+        
+        self.revealing[room_code] = True
+        
         db = self.db_session_factory()
 
         try:
