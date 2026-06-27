@@ -196,6 +196,78 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
                         voted_player_id=payload.get("voted_player_id")
                     )
 
+                # =========================
+                # LEAVE ROOM (обычный игрок выходит сам)
+                # =========================
+                elif msg_type == "leave_room":
+                    # хост не может "выйти" — у него только удаление комнаты
+                    if player_id == room.host_player_id:
+                        continue
+
+                    player = db.query(Player).filter(
+                        Player.id == player_id,
+                        Player.room_id == room.id
+                    ).first()
+
+                    if player:
+                        db.delete(player)
+                        db.commit()
+
+                        await manager.broadcast_to_room(room_code, {
+                            "type": "player_left",
+                            "data": {"player_id": player_id}
+                        })
+
+                    manager.disconnect(room_code, player_id)
+
+                    try:
+                        await websocket.send_json({"type": "left_room", "data": {}})
+                        await websocket.close()
+                    except:
+                        pass
+
+                    return
+
+                # =========================
+                # DELETE ROOM (только хост, удаляет всё для всех)
+                # =========================
+                elif msg_type == "delete_room":
+                    if player_id != room.host_player_id:
+                        continue
+
+                    from database import Phrase, Vote
+
+                    phrase_ids = [
+                        p.id for p in db.query(Phrase).filter(Phrase.room_id == room.id).all()
+                    ]
+
+                    if phrase_ids:
+                        db.query(Vote).filter(
+                            Vote.phrase_id.in_(phrase_ids)
+                        ).delete(synchronize_session=False)
+
+                    db.query(Phrase).filter(
+                        Phrase.room_id == room.id
+                    ).delete(synchronize_session=False)
+
+                    db.query(Player).filter(
+                        Player.room_id == room.id
+                    ).delete(synchronize_session=False)
+
+                    db.delete(room)
+                    db.commit()
+
+                    await manager.broadcast_to_room(room_code, {
+                        "type": "room_deleted",
+                        "data": {}
+                    })
+
+                    await manager.close_room(room_code)
+
+                    game.cleanup_room(room_code)
+
+                    return
+
             finally:
                 db.close()
 

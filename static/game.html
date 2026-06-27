@@ -84,6 +84,8 @@ button{
     <div>Room: <b id="roomCodeDisplay"></b></div>
     <div id="playersLobby"></div>
     <button id="startBtn" onclick="startGame()">START GAME</button>
+    <button id="leaveBtn" onclick="leaveRoom()">Выйти из комнаты</button>
+    <button id="deleteBtn" onclick="deleteRoom()">Удалить комнату</button>
 </div>
 
 <!-- GAME -->
@@ -135,10 +137,17 @@ let timerInterval = null;
 /* ================= START BUTTON ================= */
 function updateStartButton(){
     const btn = document.getElementById("startBtn");
-    if(!btn) return;
+    const leaveBtn = document.getElementById("leaveBtn");
+    const deleteBtn = document.getElementById("deleteBtn");
 
-    btn.style.display = isHost ? "block" : "none";
-    btn.disabled = players.length < 2;
+    if(btn){
+        btn.style.display = isHost ? "block" : "none";
+        btn.disabled = players.length < 2;
+    }
+
+    // у хоста нет кнопки "выйти" — только "удалить комнату"
+    if(leaveBtn) leaveBtn.style.display = isHost ? "none" : "block";
+    if(deleteBtn) deleteBtn.style.display = isHost ? "block" : "none";
 }
 
 /* ================= TIMER ================= */
@@ -188,6 +197,22 @@ function connectWS(){
         if(msg.type==="player_joined"){
             updateLobby();
             updateStartButton();
+        }
+
+        /* ========== PLAYER LEFT (кто-то ушёл из комнаты) ========== */
+        if(msg.type==="player_left"){
+            updateLobby();
+        }
+
+        /* ========== Я ВЫШЕЛ ИЗ КОМНАТЫ ========== */
+        if(msg.type==="left_room"){
+            backToMenu();
+        }
+
+        /* ========== КОМНАТА УДАЛЕНА ХОСТОМ ========== */
+        if(msg.type==="room_deleted"){
+            alert("Комната была удалена создателем.");
+            backToMenu();
         }
 
         /* ========== COLLECT ========== */
@@ -299,8 +324,7 @@ function renderPlayers(){
     const c = document.getElementById("playersVote");
     c.innerHTML = "";
 
-    /* 🔥 ВАЖНО:
-       автор НЕ участвует в голосовании вообще */
+    /* автор НЕ участвует в голосовании вообще */
     if(playerId === currentAuthorId){
         c.innerHTML = "<h3>Ты автор — ожидай голосование</h3>";
         return;
@@ -337,6 +361,37 @@ function sendVote(){
 
     document.querySelectorAll("#playersVote .player")
         .forEach(x=>x.style.pointerEvents="none");
+}
+
+/* ================= LEAVE / DELETE ROOM ================= */
+function leaveRoom(){
+    if(!confirm("Выйти из комнаты?")) return;
+    ws.send(JSON.stringify({type:"leave_room"}));
+}
+
+function deleteRoom(){
+    if(!confirm("Удалить комнату? Это действие нельзя отменить.")) return;
+    ws.send(JSON.stringify({type:"delete_room"}));
+}
+
+function backToMenu(){
+    if(ws){
+        try{ ws.close(); }catch(e){}
+    }
+
+    clearInterval(timerInterval);
+
+    roomCode = null;
+    playerId = null;
+    players = [];
+    isHost = false;
+    selectedVote = null;
+    currentAuthorId = null;
+
+    document.getElementById("nickname").value = "";
+    document.getElementById("roomCode").value = "";
+
+    show("menu");
 }
 
 /* ================= START ================= */

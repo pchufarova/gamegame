@@ -23,6 +23,17 @@ class ConnectionManager:
             if not self.active_connections[room_code]:
                 del self.active_connections[room_code]
 
+    async def close_room(self, room_code: str):
+        """Закрывает все WS-соединения комнаты (используется при удалении комнаты)."""
+        if room_code in self.active_connections:
+            for ws in list(self.active_connections[room_code].values()):
+                try:
+                    await ws.close()
+                except:
+                    pass
+
+            del self.active_connections[room_code]
+
     async def broadcast_to_room(self, room_code: str, message: dict):
         if room_code not in self.active_connections:
             return
@@ -50,7 +61,6 @@ class GameLogic:
         self.revealing = {}
         self._locks = {}
 
-        # 🔥 НОВОЕ: контроль сбора фраз
         self.submitted = {}
         self.collect_done = {}
 
@@ -84,7 +94,7 @@ class GameLogic:
                 "data": {"seconds": 30}
             })
 
-            # 🔥 ВАЖНО: ждём либо всех игроков, либо 30 сек
+            # ждём либо всех игроков, либо 30 сек
             try:
                 await asyncio.wait_for(
                     self.collect_done[room_code].wait(),
@@ -182,12 +192,15 @@ class GameLogic:
 
         self.submitted[room_code].add(player_id)
 
-        if self.collect_done.get(room_code):
+        if room_code in self.collect_done:
             from database import SessionLocal, Room, Player
 
             db = SessionLocal()
             try:
                 room = db.query(Room).filter(Room.code == room_code).first()
+                if not room:
+                    return
+
                 players = db.query(Player).filter(Player.room_id == room.id).all()
 
                 if len(self.submitted[room_code]) >= len(players):
@@ -281,6 +294,22 @@ class GameLogic:
 
             finally:
                 db.close()
+
+    # ================= CLEANUP (ROOM DELETED) =================
+    def cleanup_room(self, room_code: str):
+        if room_code in self._tasks:
+            self._tasks[room_code].cancel()
+
+        self.collecting.pop(room_code, None)
+        self.room_phrases.pop(room_code, None)
+        self.current_index.pop(room_code, None)
+        self.votes.pop(room_code, None)
+        self._tasks.pop(room_code, None)
+        self._running.pop(room_code, None)
+        self.revealing.pop(room_code, None)
+        self._locks.pop(room_code, None)
+        self.submitted.pop(room_code, None)
+        self.collect_done.pop(room_code, None)
 
     # ================= END =================
     async def _end_game(self, room_code: str):
