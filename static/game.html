@@ -23,23 +23,20 @@ body{
 .screen{display:none}
 .screen.active{display:block}
 
+.hidden{display:none}
+
 .player{
     padding:10px;
-    background:#eee;
     margin:5px;
-    cursor:pointer;
     border-radius:8px;
+    background:#eee;
     display:flex;
     gap:10px;
     align-items:center;
+    cursor:pointer;
 }
 
-.player.selected{
-    background:#4caf50;
-    color:#fff;
-}
-
-.hidden{display:none;}
+.player.selected{background:#4caf50;color:#fff}
 
 button{
     padding:10px;
@@ -49,6 +46,13 @@ button{
     color:white;
     cursor:pointer;
     margin:5px;
+}
+
+#myPhrase{
+    margin-top:10px;
+    padding:10px;
+    background:#f3f3f3;
+    border-radius:10px;
 }
 </style>
 </head>
@@ -70,11 +74,10 @@ button{
 <!-- LOBBY -->
 <div id="lobby" class="screen">
     <h2>Lobby</h2>
-
     <div>Room: <b id="roomCodeDisplay"></b></div>
     <div id="playersLobby"></div>
 
-    <!-- ❗ теперь кнопка всегда есть в DOM, но контролится JS -->
+    <!-- ВАЖНО: кнопка есть, но скрывается JS -->
     <button id="startBtn" onclick="startGame()">START GAME</button>
 </div>
 
@@ -83,23 +86,31 @@ button{
 
     <h2 id="phaseText">Waiting...</h2>
 
-    <div id="timer">0</div>
+    <div>
+        ⏳ Timer: <span id="timer">0</span>
+    </div>
 
     <!-- COLLECT -->
     <div id="collectBox" class="hidden">
         <h3>Напиши фразу</h3>
-        <div>⏳ <span id="collectTimer">30</span></div>
+        <div>⏳ осталось: <span id="collectTimer">30</span></div>
 
         <input id="phraseInput" placeholder="Твоя фраза">
         <button onclick="sendPhrase()">Send</button>
+
+        <!-- твоя фраза -->
+        <div id="myPhrase"></div>
     </div>
 
     <!-- VOTE -->
     <div id="voteBox" class="hidden">
-        <div id="phraseToGuess"></div>
+        <h3 id="phraseToGuess"></h3>
         <div id="playersVote"></div>
         <button onclick="sendVote()">Vote</button>
     </div>
+
+    <!-- RESULT -->
+    <div id="resultBox" class="hidden"></div>
 
 </div>
 
@@ -111,33 +122,49 @@ let ws;
 let roomCode;
 let playerId;
 let players = [];
-let selectedVote = null;
 let isHost = false;
+let selectedVote = null;
 
-// ================= UI =================
-function showScreen(id){
-    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-    document.getElementById(id).classList.add('active');
-}
-
-// 🔥 ВАЖНО: единая функция управления кнопкой
+// ================= START BUTTON FIX =================
 function updateStartButton(){
     const btn = document.getElementById("startBtn");
+    if(!btn) return;
 
-    if (!btn) return;
-
-    if (!isHost) {
-        btn.style.display = "none";
+    if(!isHost){
+        btn.style.display="none";
         return;
     }
 
-    btn.style.display = "block";
-    btn.disabled = !players || players.length < 2;
+    btn.style.display="block";
+    btn.disabled = players.length < 2;
+}
+
+// ================= TIMER FIX (client ticking) =================
+let timerInterval = null;
+let currentTimer = 0;
+
+function startLocalTimer(seconds){
+    clearInterval(timerInterval);
+    currentTimer = seconds;
+
+    timerInterval = setInterval(()=>{
+        currentTimer--;
+
+        document.getElementById("timer").innerText = currentTimer;
+
+        const ct = document.getElementById("collectTimer");
+        if(ct) ct.innerText = currentTimer;
+
+        if(currentTimer <= 0){
+            clearInterval(timerInterval);
+        }
+    }, 1000);
 }
 
 // ================= WS =================
 function connectWS(){
     const proto = location.protocol === "https:" ? "wss" : "ws";
+
     ws = new WebSocket(`${proto}://${location.host}/ws/${roomCode}/${playerId}`);
 
     ws.onmessage = (e)=>{
@@ -148,47 +175,59 @@ function connectWS(){
             return;
         }
 
+        // ===== COLLECT =====
         if(msg.type==="start_collecting"){
-            showScreen("game");
+            show("game");
 
-            document.getElementById("phaseText").innerText = "COLLECT PHASE";
+            document.getElementById("phaseText").innerText="COLLECT";
 
             document.getElementById("collectBox").classList.remove("hidden");
             document.getElementById("voteBox").classList.add("hidden");
+            document.getElementById("resultBox").classList.add("hidden");
+
+            startLocalTimer(30);
         }
 
-        if(msg.type==="timer_update"){
-            document.getElementById("timer").innerText = msg.data.seconds;
-            document.getElementById("collectTimer").innerText = msg.data.seconds;
-        }
-
+        // ===== VOTE =====
         if(msg.type==="start_voting"){
-            document.getElementById("phaseText").innerText = "VOTING";
+            document.getElementById("phaseText").innerText="VOTE";
 
             document.getElementById("collectBox").classList.add("hidden");
             document.getElementById("voteBox").classList.remove("hidden");
 
             document.getElementById("phraseToGuess").innerText =
-                "Guess: " + msg.data.phrase;
+                "Фраза: " + msg.data.phrase;
 
-            renderPlayers();
+            renderPlayers(msg.data.author_id);
+            startLocalTimer(60);
         }
 
+        // ===== RESULT (NO ALERTS) =====
         if(msg.type==="reveal_author"){
-            alert(`Фраза: ${msg.data.phrase}\nАвтор: ${msg.data.author}`);
+            document.getElementById("resultBox").classList.remove("hidden");
+
+            document.getElementById("resultBox").innerHTML = `
+                <h3>Результат раунда</h3>
+                <p><b>Фраза:</b> ${msg.data.phrase}</p>
+                <p><b>Автор:</b> ${msg.data.author}</p>
+                <p style="color:green">
+                    +${msg.data.correctVoters.includes(playerId) ? 2 : 0} очков
+                </p>
+            `;
         }
 
+        // ===== GAME END =====
         if(msg.type==="game_end"){
-            alert("GAME OVER");
-            console.log(msg.data);
+            document.getElementById("resultBox").classList.remove("hidden");
+
+            document.getElementById("resultBox").innerHTML =
+                `<h2>GAME OVER</h2><pre>${JSON.stringify(msg.data.final_scores,null,2)}</pre>`;
         }
     };
 }
 
 // ================= LOBBY =================
 async function updateLobby(){
-    if(!roomCode) return;
-
     const res = await fetch(`/api/rooms/${roomCode}`);
     const data = await res.json();
 
@@ -198,51 +237,45 @@ async function updateLobby(){
     c.innerHTML = "";
 
     players.forEach(p=>{
-        const d = document.createElement("div");
+        const d=document.createElement("div");
         d.className="player";
-
-        d.innerHTML = `
-            <div style="
-                width:30px;height:30px;
-                border-radius:50%;
-                background:${p.avatar_color};
-            "></div>
-            <div>${p.nickname}</div>
-        `;
-
+        d.innerHTML=`${p.nickname}`;
         c.appendChild(d);
     });
 
     updateStartButton();
 }
 
-// ================= PHRASES =================
+// ================= SEND PHRASE =================
 function sendPhrase(){
+    const text = document.getElementById("phraseInput").value;
+
     ws.send(JSON.stringify({
         type:"submit_phrase",
-        data:{text:document.getElementById("phraseInput").value}
+        data:{text}
     }));
 
-    document.getElementById("phraseInput").value="";
+    document.getElementById("myPhrase").innerHTML =
+        `<b>Твоя фраза:</b> ${text}`;
 }
 
-// ================= VOTE =================
-function renderPlayers(){
+// ================= VOTE (NO SELF VOTE) =================
+let phraseAuthorId = null;
+
+function renderPlayers(authorId){
+    phraseAuthorId = authorId;
+
     const c = document.getElementById("playersVote");
     c.innerHTML="";
 
     players.forEach(p=>{
+
+        if(p.id === playerId) return; // ❌ нельзя голосовать за себя
+
         const d=document.createElement("div");
         d.className="player";
 
-        d.innerHTML=`
-            <div style="
-                width:35px;height:35px;
-                border-radius:50%;
-                background:${p.avatar_color};
-            "></div>
-            <div>${p.nickname}</div>
-        `;
+        d.innerHTML=p.nickname;
 
         d.onclick=()=>{
             selectedVote = p.id;
@@ -264,15 +297,19 @@ function sendVote(){
     }));
 }
 
-// ================= ACTIONS =================
+// ================= START =================
 function startGame(){
     if(!isHost) return;
-    if(!ws || ws.readyState !== WebSocket.OPEN) return;
-
     ws.send(JSON.stringify({type:"start_game"}));
 }
 
-// ================= CREATE =================
+// ================= NAV =================
+function show(id){
+    document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+    document.getElementById(id).classList.add("active");
+}
+
+// ================= CREATE / JOIN =================
 async function createRoom(){
     const res = await fetch("/api/rooms/create",{
         method:"POST",
@@ -289,12 +326,10 @@ async function createRoom(){
     document.getElementById("roomCodeDisplay").innerText=roomCode;
 
     connectWS();
-    showScreen("lobby");
+    show("lobby");
     updateLobby();
-    updateStartButton();
 }
 
-// ================= JOIN =================
 async function joinRoom(){
     const res = await fetch("/api/rooms/join",{
         method:"POST",
@@ -312,9 +347,8 @@ async function joinRoom(){
     isHost=false;
 
     connectWS();
-    showScreen("lobby");
+    show("lobby");
     updateLobby();
-    updateStartButton();
 }
 
 </script>
