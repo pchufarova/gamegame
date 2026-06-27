@@ -11,6 +11,7 @@ import random
 from database import SessionLocal, Base, engine, Room, Player
 from game_manager import manager, GameLogic
 
+
 app = FastAPI()
 
 app.add_middleware(
@@ -125,7 +126,9 @@ def get_room(room_code: str, db: Session = Depends(get_db)):
     }
 
 
-# ================= WS =================
+# =========================
+# WS
+# =========================
 @app.websocket("/ws/{room_code}/{player_id}")
 async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: int):
     await manager.connect(room_code, player_id, websocket)
@@ -141,21 +144,49 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
             msg_type = data.get("type")
             payload = data.get("data", {})
 
-            if msg_type == "start_game":
-                await game.start_game(room_code)
+            db = SessionLocal()
 
-            elif msg_type == "submit_phrase":
-                text = payload.get("text")
+            try:
+                room = db.query(Room).filter(Room.code == room_code).first()
+                if not room:
+                    continue
 
-                if text:
-                    game.register_phrase(room_code, player_id, text)
+                # =========================
+                # START GAME
+                # =========================
+                if msg_type == "start_game":
+                    await game.start_game(room_code)
 
-            elif msg_type == "vote":
-                await game.handle_vote(
-                    room_code,
-                    voter_id=player_id,
-                    voted_player_id=payload.get("voted_player_id")
-                )
+                # =========================
+                # SUBMIT PHRASE (ONLY COLLECTING)
+                # =========================
+                elif msg_type == "submit_phrase":
+                    if not game.collecting.get(room_code, False):
+                        continue
+
+                    from database import Phrase
+
+                    phrase = Phrase(
+                        text=payload.get("text"),
+                        room_id=room.id,
+                        author_id=player_id
+                    )
+
+                    db.add(phrase)
+                    db.commit()
+
+                # =========================
+                # VOTE
+                # =========================
+                elif msg_type == "vote":
+                    await game.handle_vote(
+                        room_code,
+                        voter_id=player_id,
+                        voted_player_id=payload.get("voted_player_id")
+                    )
+
+            finally:
+                db.close()
 
     except WebSocketDisconnect:
         manager.disconnect(room_code, player_id)
@@ -164,3 +195,7 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
             "type": "player_left",
             "data": {"player_id": player_id}
         })
+
+    except Exception as e:
+        manager.disconnect(room_code, player_id)
+        print("WS ERROR:", e)
