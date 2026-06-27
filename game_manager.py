@@ -55,20 +55,25 @@ class GameLogic:
             return
 
         db = self.db_session_factory()
+
         try:
             from database import Room, Player, Phrase
 
-            room = db.query(Room).filter(Room.code == room_code).first()
+            room = db.query(Room).filter(
+                Room.code == room_code
+            ).first()
+
             if not room:
                 return
 
-            players = db.query(Player).filter(Player.room_id == room.id).all()
+            players = db.query(Player).filter(
+                Player.room_id == room.id
+            ).all()
+
             if len(players) < 2:
                 return
 
             self._running[room_code] = True
-
-            # collect phase
             self.collecting[room_code] = True
 
             await manager.broadcast_to_room(room_code, {
@@ -80,23 +85,31 @@ class GameLogic:
 
             self.collecting[room_code] = False
 
+            # даем последним websocket-сообщениям записаться
+            await asyncio.sleep(1)
+
+            db.expire_all()
+
             phrases = db.query(Phrase).filter(
                 Phrase.room_id == room.id
             ).all()
 
+            print("PLAYERS:", len(players))
+            print("PHRASES:", len(phrases))
+
+            for p in phrases:
+                print(">", p.text)
+
             if len(phrases) == 0:
                 self._running[room_code] = False
                 return
-            
-            print("PHRASES:", len(phrases))
-            for p in phrases:
-                print(p.text)
 
             random.shuffle(phrases)
 
             self.room_phrases[room_code] = phrases
             self.current_index[room_code] = 0
             self.votes[room_code] = {}
+            self.revealing[room_code] = False
 
             await self._start_phrase(room_code)
 
@@ -191,7 +204,7 @@ class GameLogic:
             return
         
         self.revealing[room_code] = True
-        
+
         db = self.db_session_factory()
 
         try:
