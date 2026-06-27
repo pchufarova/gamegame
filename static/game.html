@@ -54,6 +54,13 @@ button{
     background:#f3f3f3;
     border-radius:10px;
 }
+
+#resultBox{
+    margin-top:15px;
+    padding:15px;
+    background:#f8f8f8;
+    border-radius:10px;
+}
 </style>
 </head>
 
@@ -76,8 +83,6 @@ button{
     <h2>Lobby</h2>
     <div>Room: <b id="roomCodeDisplay"></b></div>
     <div id="playersLobby"></div>
-
-    <!-- ВАЖНО: кнопка есть, но скрывается JS -->
     <button id="startBtn" onclick="startGame()">START GAME</button>
 </div>
 
@@ -86,19 +91,16 @@ button{
 
     <h2 id="phaseText">Waiting...</h2>
 
-    <div>
-        ⏳ Timer: <span id="timer">0</span>
-    </div>
+    <div>⏳ <span id="timer">0</span></div>
 
     <!-- COLLECT -->
     <div id="collectBox" class="hidden">
         <h3>Напиши фразу</h3>
-        <div>⏳ осталось: <span id="collectTimer">30</span></div>
+        <div>осталось: <span id="collectTimer">30</span></div>
 
         <input id="phraseInput" placeholder="Твоя фраза">
         <button onclick="sendPhrase()">Send</button>
 
-        <!-- твоя фраза -->
         <div id="myPhrase"></div>
     </div>
 
@@ -124,58 +126,54 @@ let playerId;
 let players = [];
 let isHost = false;
 let selectedVote = null;
+let currentAuthorId = null;
 
-// ================= START BUTTON FIX =================
+// ---------------- START BUTTON FIX ----------------
 function updateStartButton(){
     const btn = document.getElementById("startBtn");
     if(!btn) return;
 
-    if(!isHost){
-        btn.style.display="none";
-        return;
-    }
-
-    btn.style.display="block";
+    btn.style.display = isHost ? "block" : "none";
     btn.disabled = players.length < 2;
 }
 
-// ================= TIMER FIX (client ticking) =================
+// ---------------- TIMER (single source) ----------------
 let timerInterval = null;
-let currentTimer = 0;
 
-function startLocalTimer(seconds){
+function startTimer(sec){
     clearInterval(timerInterval);
-    currentTimer = seconds;
+
+    let t = sec;
+    document.getElementById("timer").innerText = t;
+    document.getElementById("collectTimer").innerText = t;
 
     timerInterval = setInterval(()=>{
-        currentTimer--;
+        t--;
 
-        document.getElementById("timer").innerText = currentTimer;
+        document.getElementById("timer").innerText = t;
+        if(document.getElementById("collectBox"))
+            document.getElementById("collectTimer").innerText = t;
 
-        const ct = document.getElementById("collectTimer");
-        if(ct) ct.innerText = currentTimer;
-
-        if(currentTimer <= 0){
+        if(t <= 0){
             clearInterval(timerInterval);
         }
-    }, 1000);
+    },1000);
 }
 
-// ================= WS =================
+// ---------------- WS ----------------
 function connectWS(){
     const proto = location.protocol === "https:" ? "wss" : "ws";
-
     ws = new WebSocket(`${proto}://${location.host}/ws/${roomCode}/${playerId}`);
 
     ws.onmessage = (e)=>{
         const msg = JSON.parse(e.data);
 
-        if(msg.type==="player_joined" || msg.type==="player_left"){
+        if(msg.type==="player_joined"){
             updateLobby();
-            return;
+            updateStartButton();
         }
 
-        // ===== COLLECT =====
+        // -------- COLLECT --------
         if(msg.type==="start_collecting"){
             show("game");
 
@@ -185,48 +183,53 @@ function connectWS(){
             document.getElementById("voteBox").classList.add("hidden");
             document.getElementById("resultBox").classList.add("hidden");
 
-            startLocalTimer(30);
+            startTimer(30);
         }
 
-        // ===== VOTE =====
+        // -------- VOTE --------
         if(msg.type==="start_voting"){
             document.getElementById("phaseText").innerText="VOTE";
 
             document.getElementById("collectBox").classList.add("hidden");
             document.getElementById("voteBox").classList.remove("hidden");
 
+            currentAuthorId = msg.data.author_id;
+
             document.getElementById("phraseToGuess").innerText =
                 "Фраза: " + msg.data.phrase;
 
-            renderPlayers(msg.data.author_id);
-            startLocalTimer(60);
+            renderPlayers();
+            startTimer(60);
         }
 
-        // ===== RESULT (NO ALERTS) =====
+        // -------- RESULT --------
         if(msg.type==="reveal_author"){
             document.getElementById("resultBox").classList.remove("hidden");
 
+            const ok = msg.data.correctVoters.includes(playerId);
+
             document.getElementById("resultBox").innerHTML = `
-                <h3>Результат раунда</h3>
+                <h3>Раунд завершён</h3>
                 <p><b>Фраза:</b> ${msg.data.phrase}</p>
                 <p><b>Автор:</b> ${msg.data.author}</p>
-                <p style="color:green">
-                    +${msg.data.correctVoters.includes(playerId) ? 2 : 0} очков
+                <p style="color:${ok?'green':'red'}">
+                    ${ok ? "+2 очка" : "0 очков"}
                 </p>
             `;
         }
 
-        // ===== GAME END =====
+        // -------- GAME END --------
         if(msg.type==="game_end"){
             document.getElementById("resultBox").classList.remove("hidden");
 
             document.getElementById("resultBox").innerHTML =
-                `<h2>GAME OVER</h2><pre>${JSON.stringify(msg.data.final_scores,null,2)}</pre>`;
+                `<h2>GAME OVER</h2>
+                <pre>${JSON.stringify(msg.data.final_scores, null, 2)}</pre>`;
         }
     };
 }
 
-// ================= LOBBY =================
+// ---------------- LOBBY ----------------
 async function updateLobby(){
     const res = await fetch(`/api/rooms/${roomCode}`);
     const data = await res.json();
@@ -237,16 +240,16 @@ async function updateLobby(){
     c.innerHTML = "";
 
     players.forEach(p=>{
-        const d=document.createElement("div");
+        const d = document.createElement("div");
         d.className="player";
-        d.innerHTML=`${p.nickname}`;
+        d.innerText=p.nickname;
         c.appendChild(d);
     });
 
     updateStartButton();
 }
 
-// ================= SEND PHRASE =================
+// ---------------- PHRASE ----------------
 function sendPhrase(){
     const text = document.getElementById("phraseInput").value;
 
@@ -259,25 +262,22 @@ function sendPhrase(){
         `<b>Твоя фраза:</b> ${text}`;
 }
 
-// ================= VOTE (NO SELF VOTE) =================
-let phraseAuthorId = null;
-
-function renderPlayers(authorId){
-    phraseAuthorId = authorId;
-
+// ---------------- VOTE (FIXED) ----------------
+function renderPlayers(){
     const c = document.getElementById("playersVote");
-    c.innerHTML="";
+    c.innerHTML = "";
 
     players.forEach(p=>{
 
-        if(p.id === playerId) return; // ❌ нельзя голосовать за себя
+        // ❗ нельзя голосовать за себя
+        if(p.id === playerId) return;
 
-        const d=document.createElement("div");
+        const d = document.createElement("div");
         d.className="player";
 
-        d.innerHTML=p.nickname;
+        d.innerHTML = p.nickname;
 
-        d.onclick=()=>{
+        d.onclick = ()=>{
             selectedVote = p.id;
 
             document.querySelectorAll("#playersVote .player")
@@ -297,19 +297,19 @@ function sendVote(){
     }));
 }
 
-// ================= START =================
+// ---------------- START ----------------
 function startGame(){
     if(!isHost) return;
     ws.send(JSON.stringify({type:"start_game"}));
 }
 
-// ================= NAV =================
+// ---------------- NAV ----------------
 function show(id){
     document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
     document.getElementById(id).classList.add("active");
 }
 
-// ================= CREATE / JOIN =================
+// ---------------- CREATE / JOIN ----------------
 async function createRoom(){
     const res = await fetch("/api/rooms/create",{
         method:"POST",
