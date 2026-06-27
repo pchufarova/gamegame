@@ -91,11 +91,12 @@ button{
 
     <h2 id="phaseText">Waiting...</h2>
 
-    <div>⏳ <span id="timer">0</span></div>
+    <div id="timer">0</div>
 
     <!-- COLLECT -->
     <div id="collectBox" class="hidden">
         <h3>Напиши фразу</h3>
+
         <div>осталось: <span id="collectTimer">30</span></div>
 
         <input id="phraseInput" placeholder="Твоя фраза">
@@ -125,9 +126,9 @@ let roomCode;
 let playerId;
 let players = [];
 let isHost = false;
+
 let selectedVote = null;
 let currentAuthorId = null;
-
 let phraseSent = false;
 
 // ================= START BUTTON =================
@@ -144,7 +145,6 @@ function startTimer(sec){
     clearInterval(timerInterval);
 
     let t = sec;
-
     document.getElementById("timer").innerText = t;
     document.getElementById("collectTimer").innerText = t;
 
@@ -152,12 +152,24 @@ function startTimer(sec){
         t--;
 
         document.getElementById("timer").innerText = t;
-
-        if(document.getElementById("collectTimer"))
+        if(document.getElementById("collectTimer")){
             document.getElementById("collectTimer").innerText = t;
+        }
 
         if(t <= 0) clearInterval(timerInterval);
+
     },1000);
+}
+
+// ================= RESET ROUND =================
+function resetRound(){
+    phraseSent = false;
+    selectedVote = null;
+
+    document.getElementById("phraseInput").disabled = false;
+    document.getElementById("sendBtn").disabled = false;
+    document.getElementById("phraseInput").value = "";
+    document.getElementById("myPhrase").innerHTML = "";
 }
 
 // ================= WS =================
@@ -171,17 +183,6 @@ function connectWS(){
         if(msg.type==="player_joined"){
             updateLobby();
             updateStartButton();
-        }
-
-        // RESET ROUND STATE
-        function resetRound(){
-            phraseSent = false;
-            selectedVote = null;
-
-            document.getElementById("phraseInput").disabled = false;
-            document.getElementById("sendBtn").disabled = false;
-            document.getElementById("phraseInput").value = "";
-            document.getElementById("myPhrase").innerHTML = "";
         }
 
         // COLLECT
@@ -231,7 +232,7 @@ function connectWS(){
             `;
         }
 
-        // GAME END (FIX JSON UI)
+        // GAME END (FIX UI)
         if(msg.type==="game_end"){
             document.getElementById("resultBox").classList.remove("hidden");
 
@@ -269,7 +270,7 @@ async function updateLobby(){
     updateStartButton();
 }
 
-// ================= PHRASE =================
+// ================= SEND PHRASE =================
 function sendPhrase(){
     if(phraseSent) return;
 
@@ -288,7 +289,7 @@ function sendPhrase(){
         `<b>Твоя фраза:</b> ${text}`;
 }
 
-// ================= VOTE FIX =================
+// ================= VOTE (FIX: AUTHOR CANNOT VOTE) =================
 function renderPlayers(){
     const c = document.getElementById("playersVote");
     c.innerHTML = "";
@@ -297,13 +298,11 @@ function renderPlayers(){
 
         const d = document.createElement("div");
         d.className="player";
-
         d.innerText = p.nickname;
 
-        // 🔥 ЖЁСТКО: автор НЕ может голосовать
-        if(p.id === playerId || p.id === currentAuthorId){
-            d.style.opacity = "0.3";
-            d.style.pointerEvents = "none";
+        // 🔥 КЛЮЧЕВО: автор НЕ видит голосование вообще
+        if(p.id === currentAuthorId){
+            return;
         }
 
         d.onclick = ()=>{
@@ -317,10 +316,16 @@ function renderPlayers(){
 
         c.appendChild(d);
     });
+
+    // если ты автор — показываем текст вместо кнопок
+    if(playerId === currentAuthorId){
+        c.innerHTML = "<h3>Ты автор — ожидай голосование других игроков</h3>";
+    }
 }
 
+// ================= VOTE SEND =================
 function sendVote(){
-    if(selectedVote === null) return;
+    if(!selectedVote) return;
 
     ws.send(JSON.stringify({
         type:"vote",
@@ -328,7 +333,7 @@ function sendVote(){
     }));
 
     document.querySelectorAll("#playersVote .player")
-        .forEach(x=>x.style.pointerEvents = "none");
+        .forEach(x=>x.style.pointerEvents="none");
 }
 
 // ================= START =================
