@@ -99,7 +99,7 @@ button{
         <div>осталось: <span id="collectTimer">30</span></div>
 
         <input id="phraseInput" placeholder="Твоя фраза">
-        <button onclick="sendPhrase()">Send</button>
+        <button id="sendBtn" onclick="sendPhrase()">Send</button>
 
         <div id="myPhrase"></div>
     </div>
@@ -128,22 +128,23 @@ let isHost = false;
 let selectedVote = null;
 let currentAuthorId = null;
 
-// ---------------- START BUTTON FIX ----------------
+let phraseSent = false;
+
+// ================= START BUTTON =================
 function updateStartButton(){
     const btn = document.getElementById("startBtn");
-    if(!btn) return;
-
     btn.style.display = isHost ? "block" : "none";
     btn.disabled = players.length < 2;
 }
 
-// ---------------- TIMER (single source) ----------------
+// ================= TIMER =================
 let timerInterval = null;
 
 function startTimer(sec){
     clearInterval(timerInterval);
 
     let t = sec;
+
     document.getElementById("timer").innerText = t;
     document.getElementById("collectTimer").innerText = t;
 
@@ -151,16 +152,15 @@ function startTimer(sec){
         t--;
 
         document.getElementById("timer").innerText = t;
-        if(document.getElementById("collectBox"))
+
+        if(document.getElementById("collectTimer"))
             document.getElementById("collectTimer").innerText = t;
 
-        if(t <= 0){
-            clearInterval(timerInterval);
-        }
+        if(t <= 0) clearInterval(timerInterval);
     },1000);
 }
 
-// ---------------- WS ----------------
+// ================= WS =================
 function connectWS(){
     const proto = location.protocol === "https:" ? "wss" : "ws";
     ws = new WebSocket(`${proto}://${location.host}/ws/${roomCode}/${playerId}`);
@@ -173,9 +173,21 @@ function connectWS(){
             updateStartButton();
         }
 
-        // -------- COLLECT --------
+        // RESET ROUND STATE
+        function resetRound(){
+            phraseSent = false;
+            selectedVote = null;
+
+            document.getElementById("phraseInput").disabled = false;
+            document.getElementById("sendBtn").disabled = false;
+            document.getElementById("phraseInput").value = "";
+            document.getElementById("myPhrase").innerHTML = "";
+        }
+
+        // COLLECT
         if(msg.type==="start_collecting"){
             show("game");
+            resetRound();
 
             document.getElementById("phaseText").innerText="COLLECT";
 
@@ -186,7 +198,7 @@ function connectWS(){
             startTimer(30);
         }
 
-        // -------- VOTE --------
+        // VOTE
         if(msg.type==="start_voting"){
             document.getElementById("phaseText").innerText="VOTE";
 
@@ -199,10 +211,11 @@ function connectWS(){
                 "Фраза: " + msg.data.phrase;
 
             renderPlayers();
+
             startTimer(60);
         }
 
-        // -------- RESULT --------
+        // RESULT
         if(msg.type==="reveal_author"){
             document.getElementById("resultBox").classList.remove("hidden");
 
@@ -218,18 +231,25 @@ function connectWS(){
             `;
         }
 
-        // -------- GAME END --------
+        // GAME END (FIX JSON UI)
         if(msg.type==="game_end"){
             document.getElementById("resultBox").classList.remove("hidden");
 
-            document.getElementById("resultBox").innerHTML =
-                `<h2>GAME OVER</h2>
-                <pre>${JSON.stringify(msg.data.final_scores, null, 2)}</pre>`;
+            let html = "<h2>GAME OVER</h2>";
+
+            const sorted = Object.entries(msg.data.final_scores)
+                .sort((a,b)=>b[1]-a[1]);
+
+            sorted.forEach(([name,score],i)=>{
+                html += `<div class="player">#${i+1} ${name} — ${score}</div>`;
+            });
+
+            document.getElementById("resultBox").innerHTML = html;
         }
     };
 }
 
-// ---------------- LOBBY ----------------
+// ================= LOBBY =================
 async function updateLobby(){
     const res = await fetch(`/api/rooms/${roomCode}`);
     const data = await res.json();
@@ -249,33 +269,42 @@ async function updateLobby(){
     updateStartButton();
 }
 
-// ---------------- PHRASE ----------------
+// ================= PHRASE =================
 function sendPhrase(){
+    if(phraseSent) return;
+
     const text = document.getElementById("phraseInput").value;
+    if(!text) return;
 
     ws.send(JSON.stringify({
         type:"submit_phrase",
         data:{text}
     }));
 
+    phraseSent = true;
+    document.getElementById("sendBtn").disabled = true;
+
     document.getElementById("myPhrase").innerHTML =
         `<b>Твоя фраза:</b> ${text}`;
 }
 
-// ---------------- VOTE (FIXED) ----------------
+// ================= VOTE FIX =================
 function renderPlayers(){
     const c = document.getElementById("playersVote");
     c.innerHTML = "";
 
     players.forEach(p=>{
 
-        // ❗ нельзя голосовать за себя
-        if(p.id === playerId) return;
-
         const d = document.createElement("div");
         d.className="player";
 
-        d.innerHTML = p.nickname;
+        d.innerText = p.nickname;
+
+        // 🔥 ЖЁСТКО: автор НЕ может голосовать
+        if(p.id === playerId || p.id === currentAuthorId){
+            d.style.opacity = "0.3";
+            d.style.pointerEvents = "none";
+        }
 
         d.onclick = ()=>{
             selectedVote = p.id;
@@ -291,25 +320,30 @@ function renderPlayers(){
 }
 
 function sendVote(){
+    if(selectedVote === null) return;
+
     ws.send(JSON.stringify({
         type:"vote",
         data:{voted_player_id:selectedVote}
     }));
+
+    document.querySelectorAll("#playersVote .player")
+        .forEach(x=>x.style.pointerEvents = "none");
 }
 
-// ---------------- START ----------------
+// ================= START =================
 function startGame(){
     if(!isHost) return;
     ws.send(JSON.stringify({type:"start_game"}));
 }
 
-// ---------------- NAV ----------------
+// ================= NAV =================
 function show(id){
     document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
     document.getElementById(id).classList.add("active");
 }
 
-// ---------------- CREATE / JOIN ----------------
+// ================= CREATE / JOIN =================
 async function createRoom(){
     const res = await fetch("/api/rooms/create",{
         method:"POST",
