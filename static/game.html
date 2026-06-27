@@ -23,15 +23,17 @@ body{
 .screen{display:none}
 .screen.active{display:block}
 
+.hidden{display:none}
+
 .player{
     padding:10px;
     background:#eee;
     margin:5px;
     cursor:pointer;
-    border-radius:8px;
+    border-radius:10px;
     display:flex;
-    gap:10px;
     align-items:center;
+    gap:10px;
 }
 
 .player.selected{
@@ -39,16 +41,21 @@ body{
     color:#fff;
 }
 
-.hidden{display:none;}
-
 button{
     padding:10px;
     border:none;
     border-radius:8px;
     background:#667eea;
-    color:white;
+    color:#fff;
     cursor:pointer;
     margin:5px;
+}
+
+#resultBox{
+    margin-top:15px;
+    padding:10px;
+    border-radius:10px;
+    background:#f3f3f3;
 }
 </style>
 </head>
@@ -70,7 +77,6 @@ button{
 <!-- LOBBY -->
 <div id="lobby" class="screen">
     <h2>Lobby</h2>
-
     <div>Room: <b id="roomCodeDisplay"></b></div>
     <div id="playersLobby"></div>
 
@@ -82,23 +88,29 @@ button{
 
     <h2 id="phaseText">Waiting...</h2>
 
-    <div id="timer">0</div>
+    <div>⏱ <span id="timer">0</span></div>
 
     <!-- COLLECT -->
     <div id="collectBox" class="hidden">
         <h3>Напиши фразу</h3>
+
         <div>⏳ <span id="collectTimer">30</span></div>
 
         <input id="phraseInput" placeholder="Твоя фраза">
         <button onclick="sendPhrase()">Send</button>
+
+        <div id="myPhrase" style="margin-top:10px;font-weight:bold;"></div>
     </div>
 
     <!-- VOTE -->
     <div id="voteBox" class="hidden">
-        <div id="phraseToGuess"></div>
+        <h3 id="phraseToGuess"></h3>
         <div id="playersVote"></div>
         <button onclick="sendVote()">Vote</button>
     </div>
+
+    <!-- RESULT -->
+    <div id="resultBox" class="hidden"></div>
 
 </div>
 
@@ -112,6 +124,7 @@ let playerId;
 let players = [];
 let selectedVote = null;
 let isHost = false;
+let currentPhase = null;
 
 // ================= UI =================
 function showScreen(id){
@@ -119,16 +132,10 @@ function showScreen(id){
     document.getElementById(id).classList.add('active');
 }
 
-function updateStartButton(){
-    const btn = document.getElementById("startBtn");
-
-    if (!isHost) {
-        btn.style.display = "none";
-        return;
-    }
-
-    btn.style.display = "block";
-    btn.disabled = players.length < 2;
+function showResult(text){
+    const box = document.getElementById("resultBox");
+    box.classList.remove("hidden");
+    box.innerHTML += `<div>${text}</div>`;
 }
 
 // ================= WS =================
@@ -141,26 +148,35 @@ function connectWS(){
 
         if(msg.type==="player_joined"){
             updateLobby();
-            updateStartButton();
         }
 
         if(msg.type==="start_collecting"){
+            currentPhase = "collect";
+
             showScreen("game");
 
             document.getElementById("phaseText").innerText = "COLLECT PHASE";
 
             document.getElementById("collectBox").classList.remove("hidden");
             document.getElementById("voteBox").classList.add("hidden");
+
+            document.getElementById("resultBox").classList.add("hidden");
+            document.getElementById("resultBox").innerHTML = "";
         }
 
         if(msg.type==="timer_update"){
-            document.getElementById("timer").innerText = msg.data.seconds;
+            const t = msg.data.seconds;
 
-            const t = document.getElementById("collectTimer");
-            if(t) t.innerText = msg.data.seconds;
+            document.getElementById("timer").innerText = t;
+
+            if(currentPhase==="collect"){
+                document.getElementById("collectTimer").innerText = t;
+            }
         }
 
         if(msg.type==="start_voting"){
+            currentPhase = "vote";
+
             document.getElementById("phaseText").innerText = "VOTING";
 
             document.getElementById("collectBox").classList.add("hidden");
@@ -169,16 +185,24 @@ function connectWS(){
             document.getElementById("phraseToGuess").innerText =
                 "Guess: " + msg.data.phrase;
 
-            renderPlayers();
+            renderPlayers(msg.data.author_id);
         }
 
         if(msg.type==="reveal_author"){
-            alert(`Фраза: ${msg.data.phrase}\nАвтор: ${msg.data.author}`);
+            currentPhase = "reveal";
+
+            document.getElementById("voteBox").classList.add("hidden");
+
+            showResult(
+                `Фраза: ${msg.data.phrase}<br>` +
+                `Автор: <b>${msg.data.author}</b><br>` +
+                (msg.data.correct ? "🎉 Кто-то угадал!" : "😈 Никто не угадал")
+            );
         }
 
         if(msg.type==="game_end"){
-            alert("GAME OVER");
-            console.log(msg.data);
+            showResult("🏁 ИГРА ЗАВЕРШЕНА");
+            showResult(JSON.stringify(msg.data.final_scores));
         }
     };
 }
@@ -196,56 +220,49 @@ async function updateLobby(){
     players.forEach(p=>{
         const d = document.createElement("div");
         d.className="player";
-
         d.innerHTML = `
-            <div style="
-                width:30px;height:30px;
-                border-radius:50%;
-                background:${p.avatar_color};
-            "></div>
+            <div style="width:30px;height:30px;border-radius:50%;background:${p.avatar_color}"></div>
             <div>${p.nickname}</div>
         `;
-
         c.appendChild(d);
     });
-
-    updateStartButton();
 }
 
-// ================= PHRASES =================
+// ================= PHRASE =================
 function sendPhrase(){
+    const text = document.getElementById("phraseInput").value;
+
     ws.send(JSON.stringify({
         type:"submit_phrase",
-        data:{text:document.getElementById("phraseInput").value}
+        data:{text}
     }));
 
-    document.getElementById("phraseInput").value="";
+    document.getElementById("myPhrase").innerText =
+        "Твоя фраза: " + text;
 }
 
 // ================= VOTE =================
-function renderPlayers(){
+function renderPlayers(authorId){
     const c = document.getElementById("playersVote");
-    c.innerHTML="";
+    c.innerHTML = "";
 
     players.forEach(p=>{
+
+        // ❌ нельзя голосовать за себя
+        if(p.id === playerId) return;
+
         const d=document.createElement("div");
         d.className="player";
 
         d.innerHTML=`
-            <div style="
-                width:35px;height:35px;
-                border-radius:50%;
-                background:${p.avatar_color};
-            "></div>
+            <div style="width:35px;height:35px;border-radius:50%;background:${p.avatar_color}"></div>
             <div>${p.nickname}</div>
         `;
 
         d.onclick=()=>{
             selectedVote = p.id;
-
             document.querySelectorAll("#playersVote .player")
                 .forEach(x=>x.classList.remove("selected"));
-
             d.classList.add("selected");
         };
 
@@ -260,14 +277,13 @@ function sendVote(){
     }));
 }
 
-// ================= ACTIONS =================
+// ================= START =================
 function startGame(){
     if (!isHost) return;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
     ws.send(JSON.stringify({type:"start_game"}));
 }
 
+// ================= INIT =================
 async function createRoom(){
     const res = await fetch("/api/rooms/create",{
         method:"POST",
@@ -286,7 +302,6 @@ async function createRoom(){
     connectWS();
     showScreen("lobby");
     updateLobby();
-    updateStartButton();
 }
 
 async function joinRoom(){
@@ -308,7 +323,6 @@ async function joinRoom(){
     connectWS();
     showScreen("lobby");
     updateLobby();
-    updateStartButton();
 }
 
 </script>
