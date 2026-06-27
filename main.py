@@ -11,7 +11,6 @@ import random
 from database import SessionLocal, Base, engine, Room, Player
 from game_manager import manager, GameLogic
 
-
 app = FastAPI()
 
 app.add_middleware(
@@ -126,9 +125,7 @@ def get_room(room_code: str, db: Session = Depends(get_db)):
     }
 
 
-# =========================
-# WS
-# =========================
+# ================= WS =================
 @app.websocket("/ws/{room_code}/{player_id}")
 async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: int):
     await manager.connect(room_code, player_id, websocket)
@@ -151,7 +148,6 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
                 text = payload.get("text")
 
                 if text:
-                    # 🔥 ВАЖНО: теперь не БД, а память GameLogic
                     game.register_phrase(room_code, player_id, text)
 
             elif msg_type == "vote":

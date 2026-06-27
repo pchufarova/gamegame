@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, List
 import asyncio
 import random
 from fastapi import WebSocket
@@ -44,17 +44,16 @@ class GameLogic:
         self.collecting = {}
         self.submitted = {}
 
-        self.room_phrases = {}
-        self.players_cache = {}
+        self.room_phrases: Dict[str, List[str]] = {}
+        self.players_cache: Dict[str, List] = {}
 
         self.current_index = {}
         self.votes = {}
         self._tasks = {}
         self._running = {}
-
         self.revealing = {}
 
-    # ================= START GAME =================
+    # ================= START =================
     async def start_game(self, room_code: str):
         if self._running.get(room_code):
             return
@@ -76,26 +75,21 @@ class GameLogic:
             self._running[room_code] = True
             self.collecting[room_code] = True
 
-            # сохраняем игроков
             self.players_cache[room_code] = players
-
-            # init
-            self.submitted[room_code] = set()
+            self.submitted[room_code] = []
 
             await manager.broadcast_to_room(room_code, {
                 "type": "start_collecting",
                 "data": {"seconds": 30}
             })
 
-            # ждём сбор фраз
             await asyncio.sleep(30)
 
             self.collecting[room_code] = False
 
-            # гарантируем фразы
-            phrases = list(self.submitted.get(room_code, []))
+            phrases = self.submitted.get(room_code, [])
 
-            # если кто-то не успел — подставляем дефолт
+            # 🔥 ДОБИВКА чтобы не было -1 раунда
             while len(phrases) < len(players):
                 phrases.append("...")
 
@@ -111,12 +105,12 @@ class GameLogic:
         finally:
             db.close()
 
-    # ================= REGISTER PHRASE =================
+    # ================= REGISTER =================
     def register_phrase(self, room_code: str, player_id: int, text: str):
         if room_code not in self.submitted:
-            self.submitted[room_code] = set()
+            self.submitted[room_code] = []
 
-        self.submitted[room_code].add(text)
+        self.submitted[room_code].append(text)
 
     # ================= PHRASE =================
     async def _start_phrase(self, room_code: str):
@@ -221,9 +215,7 @@ class GameLogic:
             "type": "game_end",
             "data": {
                 "winner": winner.nickname,
-                "final_scores": {
-                    p.nickname: 0 for p in players
-                }
+                "final_scores": {p.nickname: 0 for p in players}
             }
         })
 
