@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict
 from fastapi import WebSocket
 import random
 import asyncio
@@ -48,6 +48,7 @@ class GameLogic:
         self._tasks = {}
         self._running = {}
         self.revealing = {}
+        self._reveal_lock = {}
 
     # ================= START =================
     async def start_game(self, room_code: str):
@@ -85,7 +86,6 @@ class GameLogic:
 
             self.collecting[room_code] = False
 
-            # даем последним websocket-сообщениям записаться
             await asyncio.sleep(1)
 
             db.expire_all()
@@ -110,6 +110,7 @@ class GameLogic:
             self.current_index[room_code] = 0
             self.votes[room_code] = {}
             self.revealing[room_code] = False
+            self._reveal_lock[room_code] = asyncio.Lock()
 
             await self._start_phrase(room_code)
 
@@ -119,6 +120,7 @@ class GameLogic:
     # ================= PHRASE =================
     async def _start_phrase(self, room_code: str):
         self.revealing[room_code] = False
+
         idx = self.current_index.get(room_code, 0)
         phrases = self.room_phrases.get(room_code, [])
 
@@ -140,7 +142,9 @@ class GameLogic:
         if room_code in self._tasks:
             self._tasks[room_code].cancel()
 
-        self._tasks[room_code] = asyncio.create_task(self._voting_timer(room_code))
+        self._tasks[room_code] = asyncio.create_task(
+            self._voting_timer(room_code)
+        )
 
     # ================= TIMER =================
     async def _voting_timer(self, room_code: str):
@@ -151,10 +155,10 @@ class GameLogic:
                     "data": {"seconds": i}
                 })
 
-                await asyncio.sleep(1)
-
                 if self._all_voted(room_code):
                     break
+
+                await asyncio.sleep(1)
 
             await self._reveal(room_code)
 
@@ -162,13 +166,21 @@ class GameLogic:
             return
 
     # ================= VOTES =================
-    async def handle_vote(self, room_code: str, voter_id: int, voted_player_id: int):
+    async def handle_vote(
+        self,
+        room_code: str,
+        voter_id: int,
+        voted_player_id: int
+    ):
         if room_code not in self.votes:
             self.votes[room_code] = {}
 
         self.votes[room_code][voter_id] = voted_player_id
 
         if self._all_voted(room_code):
+            if room_code in self._tasks:
+                self._tasks[room_code].cancel()
+
             await self._reveal(room_code)
 
     def _all_voted(self, room_code):
@@ -188,65 +200,88 @@ class GameLogic:
                 Player.room_id == room.id
             ).all()
 
-            idx = self.current_index.get(room_code, 0)
-            phrase = self.room_phrases[room_code][idx]
-
             voters_count = len(players) - 1
 
-            return len(self.votes.get(room_code, {})) >= voters_count
+            return len(
+                self.votes.get(room_code, {})
+            ) >= voters_count
 
         finally:
             db.close()
 
     # ================= REVEAL =================
     async def _reveal(self, room_code: str):
-        if self.revealing.get(room_code):
-            return
-        
-        self.revealing[room_code] = True
+        async with self._reveal_lock[room_code]:
 
-        db = self.db_session_factory()
+            if self.revealing.get(room_code):
+                return
 
-        try:
-            from database import Player
+            self.revealing[room_code] = True
 
-            idx = self.current_index[room_code]
-            phrase = self.room_phrases[room_code][idx]
+            db = self.db_session_factory()
 
-            votes = self.votes.get(room_code, {})
+            try:
+                from database import Player
 
-            players = db.query(Player).filter(Player.room_id == phrase.room_id).all()
+                idx = self.current_index[room_code]
 
-            correct_voters = []
+                if idx >= len(self.room_phrases[room_code]):
+                    return
 
-            for voter_id, voted_id in votes.items():
-                if voted_id == phrase.author_id:
-                    correct_voters.append(voter_id)
+                phrase = self.room_phrases[room_code][idx]
 
-                    voter = next((p for p in players if p.id == voter_id), None)
-                    if voter:
-                        voter.score += 2
+                votes = self.votes.get(room_code, {})
 
-            db.commit()
+                players = db.query(Player).filter(
+                    Player.room_id == phrase.room_id
+                ).all()
 
-            author = db.query(Player).filter(Player.id == phrase.author_id).first()
+                correct_voters = []
 
-            await manager.broadcast_to_room(room_code, {
-                "type": "reveal_author",
-                "data": {
-                    "phrase": phrase.text,
-                    "author": author.nickname,
-                    "correctVoters": correct_voters
-                }
-            })
+                for voter_id, voted_id in votes.items():
+                    if voted_id == phrase.author_id:
+                        correct_voters.append(voter_id)
 
-            await asyncio.sleep(3)
+                        voter = next(
+                            (p for p in players if p.id == voter_id),
+                            None
+                        )
 
-            self.current_index[room_code] += 1
-            await self._start_phrase(room_code)
+                        if voter:
+                            voter.score += 2
 
-        finally:
-            db.close()
+                db.commit()
+
+                author = db.query(Player).filter(
+                    Player.id == phrase.author_id
+                ).first()
+
+                await manager.broadcast_to_room(room_code, {
+                    "type": "reveal_author",
+                    "data": {
+                        "phrase": phrase.text,
+                        "author": author.nickname,
+                        "correctVoters": correct_voters
+                    }
+                })
+
+                await asyncio.sleep(3)
+
+                self.current_index[room_code] += 1
+
+                print(
+                    "NEXT INDEX:",
+                    self.current_index[room_code],
+                    "OF",
+                    len(self.room_phrases[room_code])
+                )
+
+                self.revealing[room_code] = False
+
+                await self._start_phrase(room_code)
+
+            finally:
+                db.close()
 
     # ================= END =================
     async def _end_game(self, room_code: str):
@@ -255,8 +290,13 @@ class GameLogic:
         try:
             from database import Player, Room
 
-            room = db.query(Room).filter(Room.code == room_code).first()
-            players = db.query(Player).filter(Player.room_id == room.id).all()
+            room = db.query(Room).filter(
+                Room.code == room_code
+            ).first()
+
+            players = db.query(Player).filter(
+                Player.room_id == room.id
+            ).all()
 
             winner = max(players, key=lambda p: p.score)
 
@@ -264,7 +304,10 @@ class GameLogic:
                 "type": "game_end",
                 "data": {
                     "winner": winner.nickname,
-                    "final_scores": {p.nickname: p.score for p in players}
+                    "final_scores": {
+                        p.nickname: p.score
+                        for p in players
+                    }
                 }
             })
 
@@ -272,3 +315,9 @@ class GameLogic:
             db.close()
 
         self._running[room_code] = False
+        self.room_phrases.pop(room_code, None)
+        self.current_index.pop(room_code, None)
+        self.votes.pop(room_code, None)
+        self.revealing.pop(room_code, None)
+        self._tasks.pop(room_code, None)
+        self._reveal_lock.pop(room_code, None)
