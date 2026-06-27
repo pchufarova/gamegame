@@ -84,7 +84,14 @@ class GameLogic:
                 "data": {"seconds": 30}
             })
 
-            await self.collect_done[room_code].wait()
+            # 🔥 ВАЖНО: ждём либо всех игроков, либо 30 сек
+            try:
+                await asyncio.wait_for(
+                    self.collect_done[room_code].wait(),
+                    timeout=30
+                )
+            except asyncio.TimeoutError:
+                pass
 
             self.collecting[room_code] = False
 
@@ -95,13 +102,6 @@ class GameLogic:
             phrases = db.query(Phrase).filter(
                 Phrase.room_id == room.id
             ).all()
-            if len(phrases) != len(players):
-                print("❌ NOT ALL PHRASES COLLECTED")
-                print("Players:", len(players))
-                print("Phrases:", len(phrases))
-
-                self._running[room_code] = False
-                return
 
             print("PLAYERS:", len(players))
             print("PHRASES:", len(phrases))
