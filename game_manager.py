@@ -60,7 +60,12 @@ class GameLogic:
         self._running = {}
         self.revealing = {}
         self._locks = {}
-
+        self.default_phrases = [
+        "Я опоздун(",
+        "30 секунд вам или 60 мне",
+        "Я случайно здесь оказался",
+        "Да не успеваю я блин написать"
+    ]
         self.submitted = {}
         self.collect_done = {}
 
@@ -102,6 +107,39 @@ class GameLogic:
                 )
             except asyncio.TimeoutError:
                 pass
+
+            # создаём фразы за опоздавших игроков
+            db.expire_all()
+
+            submitted = self.submitted.get(room_code, set())
+
+            for player in players:
+                if player.id in submitted:
+                    continue
+
+                free_phrases = self.default_phrases.copy()
+                random.shuffle(free_phrases)
+
+                for player in players:
+                    if player.id in submitted:
+                        continue
+
+                    if free_phrases:
+                        text = free_phrases.pop()
+                    else:
+                        text = random.choice(self.default_phrases)
+
+                    phrase = Phrase(
+                        text=text,
+                        room_id=room.id,
+                        author_id=player.id
+                    )
+
+                    db.add(phrase)
+
+                db.add(phrase)
+
+            db.commit()
 
             self.collecting[room_code] = False
 
