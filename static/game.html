@@ -12,11 +12,18 @@
 body{
     margin:0;
     padding:20px;
+    min-height:100vh;
     font-family:"Segoe UI",sans-serif;
     color:#f3e8d2;
+
     background:
-        radial-gradient(circle at top,#4a1f14 0%,#22110d 30%,#0d0b0a 70%,#050505 100%);
-    min-height:100vh;
+        linear-gradient(rgba(0,0,0,.65), rgba(0,0,0,.65)),
+        url("/static/images/background.jpg");
+
+    background-size:cover;
+    background-position:center;
+    background-repeat:no-repeat;
+    background-attachment:fixed;
 }
 
 .container{
