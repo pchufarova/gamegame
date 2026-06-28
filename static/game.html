@@ -61,6 +61,14 @@ button{
     background:#f8f8f8;
     border-radius:10px;
 }
+
+#endButtons{
+    margin-top:20px;
+    display:flex;
+    gap:10px;
+    justify-content:center;
+}
+
 </style>
 </head>
 
@@ -115,6 +123,16 @@ button{
 
     <!-- RESULT -->
     <div id="resultBox" class="hidden"></div>
+
+    <div id="endButtons" class="hidden">
+        <button id="endLeaveBtn" onclick="leaveRoom()">
+            Выйти из комнаты
+        </button>
+
+        <button id="endDeleteBtn" onclick="deleteRoom()">
+            Удалить комнату
+        </button>
+    </div>
 
 </div>
 
@@ -219,6 +237,8 @@ function connectWS(){
         if(msg.type==="start_collecting"){
             show("game");
             resetRound();
+            document.getElementById("endButtons")
+            .classList.add("hidden");
 
             document.getElementById("phaseText").innerText="COLLECT";
 
@@ -264,19 +284,36 @@ function connectWS(){
 
         /* ========== GAME END (FIXED UI) ========== */
         if(msg.type==="game_end"){
-            document.getElementById("resultBox").classList.remove("hidden");
+        document.getElementById("resultBox")
+            .classList.remove("hidden");
 
-            let html = "<h2>GAME OVER</h2>";
+        let html = "<h2>GAME OVER</h2>";
 
-            const scores = msg.data.final_scores || {};
-            const sorted = Object.entries(scores).sort((a,b)=>b[1]-a[1]);
+        const scores = msg.data.final_scores || {};
+        const sorted = Object.entries(scores)
+            .sort((a,b)=>b[1]-a[1]);
 
-            sorted.forEach(([name,score],i)=>{
-                html += `<div class="player">#${i+1} ${name} — ${score}</div>`;
-            });
+        sorted.forEach(([name,score],i)=>{
+            html += `
+                <div class="player">
+                    #${i+1} ${name} — ${score}
+                </div>
+            `;
+        });
 
-            document.getElementById("resultBox").innerHTML = html;
-        }
+        document.getElementById("resultBox").innerHTML = html;
+
+        const endButtons =
+            document.getElementById("endButtons");
+
+        endButtons.classList.remove("hidden");
+
+        document.getElementById("endLeaveBtn")
+            .style.display = isHost ? "none" : "block";
+
+        document.getElementById("endDeleteBtn")
+            .style.display = isHost ? "block" : "none";
+    }
     };
 }
 
@@ -387,6 +424,9 @@ function backToMenu(){
     isHost = false;
     selectedVote = null;
     currentAuthorId = null;
+
+    document.getElementById("endButtons")
+    .classList.add("hidden");
 
     document.getElementById("nickname").value = "";
     document.getElementById("roomCode").value = "";
