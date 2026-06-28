@@ -108,38 +108,34 @@ class GameLogic:
             except asyncio.TimeoutError:
                 pass
 
+
             # создаём фразы за опоздавших игроков
             db.expire_all()
 
             submitted = self.submitted.get(room_code, set())
 
+            free_phrases = self.default_phrases.copy()
+            random.shuffle(free_phrases)
+
             for player in players:
                 if player.id in submitted:
                     continue
 
-                free_phrases = self.default_phrases.copy()
-                random.shuffle(free_phrases)
+                if free_phrases:
+                    text = free_phrases.pop()
+                else:
+                    text = random.choice(self.default_phrases)
 
-                for player in players:
-                    if player.id in submitted:
-                        continue
-
-                    if free_phrases:
-                        text = free_phrases.pop()
-                    else:
-                        text = random.choice(self.default_phrases)
-
-                    phrase = Phrase(
-                        text=text,
-                        room_id=room.id,
-                        author_id=player.id
-                    )
-
-                    db.add(phrase)
+                phrase = Phrase(
+                    text=text,
+                    room_id=room.id,
+                    author_id=player.id
+                )
 
                 db.add(phrase)
 
             db.commit()
+            db.expire_all()
 
             self.collecting[room_code] = False
 

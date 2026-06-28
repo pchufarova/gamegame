@@ -173,6 +173,14 @@ async def websocket_endpoint(websocket: WebSocket, room_code: str, player_id: in
 
                     from database import Phrase
 
+                    existing = db.query(Phrase).filter(
+                        Phrase.room_id == room.id,
+                        Phrase.author_id == player_id
+                    ).first()
+
+                    if existing:
+                        continue
+
                     phrase = Phrase(
                         text=payload.get("text"),
                         room_id=room.id,
