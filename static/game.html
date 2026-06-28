@@ -5,70 +5,162 @@
 <title>Word Game</title>
 
 <style>
+*{
+    box-sizing:border-box;
+}
+
 body{
-    font-family:Segoe UI;
-    background:linear-gradient(135deg,#667eea,#764ba2);
     margin:0;
     padding:20px;
+    font-family:"Segoe UI",sans-serif;
+    color:#f3e8d2;
+    background:
+        radial-gradient(circle at top,#4a1f14 0%,#22110d 30%,#0d0b0a 70%,#050505 100%);
+    min-height:100vh;
 }
 
 .container{
-    background:#fff;
     max-width:900px;
     margin:auto;
-    padding:20px;
-    border-radius:20px;
+    padding:30px;
+    border-radius:24px;
+    background:rgba(20,16,14,.9);
+    border:1px solid rgba(201,160,74,.25);
+    box-shadow:
+        0 0 50px rgba(0,0,0,.7),
+        0 0 25px rgba(140,75,20,.15);
+    backdrop-filter:blur(8px);
 }
 
-.screen{display:none}
-.screen.active{display:block}
-
-.hidden{display:none}
-
-.player{
-    padding:10px;
-    margin:5px;
-    border-radius:8px;
-    background:#eee;
-    display:flex;
-    gap:10px;
-    align-items:center;
-    cursor:pointer;
+h1,h2,h3{
+    color:#d9b36a;
+    text-align:center;
+    font-weight:300;
+    letter-spacing:2px;
+    text-transform:uppercase;
 }
 
-.player.selected{background:#4caf50;color:#fff}
+input{
+    width:100%;
+    padding:12px 15px;
+    margin:8px 0;
+    border-radius:10px;
+    border:1px solid #5c4834;
+    background:#1b1715;
+    color:#f3e8d2;
+    font-size:15px;
+    transition:.25s;
+}
+
+input:focus{
+    outline:none;
+    border-color:#c89b3c;
+    box-shadow:0 0 12px rgba(200,155,60,.35);
+}
 
 button{
-    padding:10px;
+    padding:12px 22px;
+    margin:6px;
     border:none;
-    border-radius:8px;
-    background:#667eea;
-    color:white;
+    border-radius:10px;
     cursor:pointer;
-    margin:5px;
+    color:#fdf5e6;
+    font-weight:600;
+    background:linear-gradient(180deg,#8b5a2b,#5f3415);
+    transition:.25s;
+    box-shadow:0 4px 10px rgba(0,0,0,.45);
 }
 
-#myPhrase{
-    margin-top:10px;
-    padding:10px;
-    background:#f3f3f3;
-    border-radius:10px;
+button:hover{
+    transform:translateY(-2px);
+    background:linear-gradient(180deg,#b67b34,#74411c);
+    box-shadow:0 0 20px rgba(201,160,74,.35);
+}
+
+button:disabled{
+    background:#444;
+    color:#888;
+    cursor:not-allowed;
+    transform:none;
+    box-shadow:none;
+}
+
+.screen{
+    display:none;
+}
+
+.screen.active{
+    display:block;
+}
+
+.hidden{
+    display:none;
+}
+
+.player{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin:10px 0;
+    padding:14px;
+    border-radius:12px;
+    background:#241b18;
+    border:1px solid rgba(201,160,74,.18);
+    transition:.25s;
+    cursor:pointer;
+}
+
+.player:hover{
+    background:#31231d;
+}
+
+.player.selected{
+    background:linear-gradient(90deg,#8a5a21,#c89b3c);
+    color:#111;
+    font-weight:bold;
+}
+
+#myPhrase,
+#resultBox,
+#voteBox,
+#collectBox{
+    margin-top:18px;
+    padding:18px;
+    border-radius:16px;
+    background:#181311;
+    border:1px solid rgba(201,160,74,.2);
+    box-shadow:inset 0 0 18px rgba(255,180,90,.05);
 }
 
 #resultBox{
-    margin-top:15px;
-    padding:15px;
-    background:#f8f8f8;
-    border-radius:10px;
+    animation:fade .4s ease;
 }
 
-#endButtons{
-    margin-top:20px;
-    display:flex;
-    gap:10px;
-    justify-content:center;
+#timer,
+#collectTimer{
+    color:#e5b45d;
+    font-weight:bold;
+    font-size:22px;
 }
 
+b{
+    color:#e3c17a;
+}
+
+::placeholder{
+    color:#887565;
+}
+
+@keyframes fade{
+    from{
+        opacity:0;
+        transform:translateY(12px);
+    }
+    to{
+        opacity:1;
+        transform:translateY(0);
+    }
+}
 </style>
 </head>
 
